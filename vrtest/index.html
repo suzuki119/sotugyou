@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+    <!-- ホーム画面に追加して開くと、Safari のアドレスバーが消えて全画面になる -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>手の認識テスト</title>
+    <style>
+        html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: #fff; font-family: -apple-system, sans-serif; touch-action: none; -webkit-user-select: none; user-select: none; }
+        #view { position: fixed; inset: 0; width: 100%; height: 100%; }
+        video { display: none; }
+
+        /* 開始画面（iPhone では、カメラとジャイロの許可はボタンを押した瞬間にしか求められない） */
+        #start { position: fixed; inset: 0; z-index: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 16px; background: #111; overflow-y: auto; }
+        #start h1 { margin: 0; font-size: 22px; }
+        #start p { margin: 0; font-size: 14px; color: #aaa; text-align: center; max-width: 30em; }
+        .row { display: flex; gap: 8px; align-items: center; font-size: 15px; }
+        select, button { font-size: 16px; padding: 6px 10px; border-radius: 6px; }
+        #go { font-size: 20px; padding: 12px 40px; background: #FFD600; border: 0; font-weight: bold; }
+
+        /* 通常モードのボタン（VRモードでは隠す） */
+        #tools { position: fixed; right: 12px; bottom: 12px; z-index: 1; display: flex; gap: 8px; }
+        body.vr #tools { display: none; }
+    </style>
+</head>
+
+<body>
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="view"></canvas>
+
+    <div id="start">
+        <h1>手の認識テスト（背面カメラ）</h1>
+        <p>スマホを横向きにして使います。開始後、画面をタップすると「通常表示 ⇔ VR表示（左右2画面）」が切り替わります。</p>
+        <!-- カメラの名前は、一度カメラを許可しないとブラウザが教えてくれない。そのため一覧は別のボタンで取得する -->
+        <div class="row">カメラ
+            <select id="camera">
+                <option value="">自動（背面）</option>
+            </select>
+            <button id="listCameras">一覧を取得</button>
+        </div>
+        <div class="row">解像度
+            <select id="res">
+                <option value="640x480">640×480（軽い）</option>
+                <option value="1280x720" selected>1280×720</option>
+                <option value="1920x1080">1920×1080（重い）</option>
+            </select>
+        </div>
+        <div class="row">検出する手
+            <select id="numHands">
+                <option value="1">1本</option>
+                <option value="2" selected>2本</option>
+            </select>
+        </div>
+        <div class="row">処理
+            <select id="delegate">
+                <option value="GPU" selected>GPU</option>
+                <option value="CPU">CPU</option>
+            </select>
+        </div>
+        <div class="row">VR表示の倍率
+            <select id="vrScale">
+                <option value="0.7">70%</option>
+                <option value="0.85">85%</option>
+                <option value="1" selected>100%</option>
+            </select>
+        </div>
+        <button id="go">開始</button>
+        <p id="startMsg"></p>
+    </div>
+
+    <div id="tools">
+        <button id="saveCsv">CSVを保存</button>
+    </div>
+
+    <script type="module">
+        import { FilesetResolver, HandLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1";
+        import { judgePose, foreshortening, poseLabel } from './hand.js';
+
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('view');
+        const ctx = canvas.getContext('2d');
+        const startMsg = document.getElementById('startMsg');
+
+        // -------------------------------------------------------------
+        //  計測用の状態
+        // -------------------------------------------------------------
+        let landmarker;
+        let results = [];          // 最新の検出結果 { lm, pose, side, fs, palmPx }
+        let vrMode = false;
+        let vrScale = 1;
+        const startTime = performance.now();
+        let renderTimes = [];      // 描画した時刻（直近1秒）
+        let detectTimes = [];      // 検出した時刻（直近1秒）
+        let lastDetectMs = 0;      // 1回の検出にかかった時間
+        let seenHistory = [];      // { t, seen }（直近5秒）。手を見失った割合を出す
+        let fpsGraph = [];         // 10秒ごとの検出fps（発熱で落ちていくかを見る）
+        let lastGraphTime = 0;
+        const log = [];            // CSV 用
+
+        // 頭の回転の速さ（度/秒）。速く回したときに手を見失うかを見る
+        let rotSpeed = 0;
+        let orient = { alpha: 0, beta: 0, gamma: 0 };
+
+        // -------------------------------------------------------------
+        //  カメラの一覧（iPhone 11 なら「背面超広角カメラ」などが出るかを確かめる）
+        // -------------------------------------------------------------
+        document.getElementById('listCameras').onclick = async () => {
+            try {
+                // 一度カメラを開いて許可をもらうと、enumerateDevices がカメラの名前を返すようになる
+                const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                s.getTracks().forEach(t => t.stop());
+                const cams = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+                const sel = document.getElementById('camera');
+                sel.innerHTML = '<option value="">自動（背面）</option>' +
+                    cams.map(c => `<option value="${c.deviceId}">${c.label || 'カメラ'}</option>`).join('');
+                startMsg.textContent = `カメラが ${cams.length} 台見つかりました`;
+            } catch (err) {
+                startMsg.textContent = 'カメラを使えません: ' + err.name + '（HTTPS で開いていますか？）';
+            }
+        };
+
+        // -------------------------------------------------------------
+        //  開始（ボタンを押したときに、許可が必要なものをまとめて始める）
+        // -------------------------------------------------------------
+        document.getElementById('go').onclick = async () => {
+            const [w, h] = document.getElementById('res').value.split('x').map(Number);
+            const numHands = Number(document.getElementById('numHands').value);
+            const delegate = document.getElementById('delegate').value;
+            vrScale = Number(document.getElementById('vrScale').value);
+            const cameraId = document.getElementById('camera').value;
+
+            // ジャイロの許可（iOS 13 以降はボタン操作の中で requestPermission を呼ぶ必要がある）
+            try {
+                if (typeof window.DeviceMotionEvent?.requestPermission === 'function') {
+                    await DeviceMotionEvent.requestPermission();
+                }
+                if (typeof window.DeviceOrientationEvent?.requestPermission === 'function') {
+                    await DeviceOrientationEvent.requestPermission();
+                }
+            } catch (e) {
+                console.warn('ジャイロの許可に失敗', e);
+            }
+            addEventListener('devicemotion', (e) => {
+                const r = e.rotationRate;
+                if (r) rotSpeed = Math.hypot(r.alpha || 0, r.beta || 0, r.gamma || 0);
+            });
+            addEventListener('deviceorientation', (e) => {
+                orient = { alpha: e.alpha || 0, beta: e.beta || 0, gamma: e.gamma || 0 };
+            });
+
+            // 背面カメラ（facingMode: environment）。鏡像にはしない
+            startMsg.textContent = 'カメラを起動中…';
+            try {
+                video.srcObject = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        ...(cameraId ? { deviceId: { exact: cameraId } } : { facingMode: { ideal: 'environment' } }),
+                        width: { ideal: w }, height: { ideal: h },
+                    },
+                    audio: false,
+                });
+                await video.play();
+            } catch (err) {
+                startMsg.textContent = 'カメラを使えません: ' + err.name + '（HTTPS で開いていますか？）';
+                return;
+            }
+
+            startMsg.textContent = 'モデルを読み込み中…';
+            try {
+                const vision = await FilesetResolver.forVisionTasks(
+                    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm'
+                );
+                landmarker = await HandLandmarker.createFromOptions(vision, {
+                    baseOptions: {
+                        modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+                        delegate,
+                    },
+                    runningMode: 'VIDEO',
+                    numHands,
+                });
+            } catch (err) {
+                startMsg.textContent = 'モデルを読み込めません: ' + err.message;
+                return;
+            }
+
+            // 画面が暗くならないようにする（iOS 16.4 以降）
+            try { await navigator.wakeLock?.request('screen'); } catch (e) { }
+
+            document.getElementById('start').remove();
+            resize();
+            requestAnimationFrame(render);
+            scheduleDetect();
+        };
+
+        // -------------------------------------------------------------
+        //  検出ループ（新しい映像フレームが来たときだけ検出する）
+        // -------------------------------------------------------------
+        function scheduleDetect() {
+            if (video.requestVideoFrameCallback) {
+                video.requestVideoFrameCallback(() => { detect(); scheduleDetect(); });
+            } else {
+                requestAnimationFrame(() => { detect(); scheduleDetect(); });
+            }
+        }
+
+        let lastVideoTime = -1;
+        function detect() {
+            if (video.currentTime === lastVideoTime) return;
+            lastVideoTime = video.currentTime;
+
+            const t0 = performance.now();
+            const r = landmarker.detectForVideo(video, t0);
+            const t1 = performance.now();
+            lastDetectMs = t1 - t0;
+            detectTimes.push(t1);
+
+            results = r.landmarks.map((lm, i) => {
+                const pose = judgePose(r.worldLandmarks[i]);
+                const palmPx = Math.hypot((lm[0].x - lm[9].x) * video.videoWidth, (lm[0].y - lm[9].y) * video.videoHeight);
+                return {
+                    lm, pose, palmPx,
+                    fs: foreshortening(lm),
+                    side: r.handedness[i]?.[0]?.categoryName ?? '?',
+                    score: r.handedness[i]?.[0]?.score ?? 0,
+                };
+            });
+
+            seenHistory.push({ t: t1, seen: results.length > 0 });
+
+            const first = results[0];
+            log.push([
+                ((t1 - startTime) / 1000).toFixed(3), lastDetectMs.toFixed(1), results.length,
+                first ? first.side : '', first ? (first.pose.gun ? 'gun' : first.pose.hammer ? 'hammer' : first.pose.grip ? 'grip' : 'none') : '',
+                first ? first.pose.indexBend.toFixed(0) : '', first ? first.pose.thumbAngle.toFixed(0) : '',
+                first ? first.fs.toFixed(2) : '', first ? first.palmPx.toFixed(0) : '',
+                rotSpeed.toFixed(0), orient.beta.toFixed(0), orient.gamma.toFixed(0),
+            ]);
+        }
+
+        // -------------------------------------------------------------
+        //  描画ループ（検出とは別に、画面の更新ごとに描く）
+        // -------------------------------------------------------------
+        const CONNECTIONS = HandLandmarker.HAND_CONNECTIONS.map(c => [c.start, c.end]);
+
+        function resize() {
+            const dpr = devicePixelRatio || 1;
+            canvas.width = innerWidth * dpr;
+            canvas.height = innerHeight * dpr;
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        }
+        addEventListener('resize', resize);
+
+        // タップで 通常表示 ⇔ VR表示
+        canvas.addEventListener('pointerdown', () => {
+            vrMode = !vrMode;
+            document.body.classList.toggle('vr', vrMode);
+        });
+
+        document.getElementById('saveCsv').onclick = () => {
+            const header = 'time_s,detect_ms,hands,handedness,pose,index_bend,thumb_angle,foreshortening,palm_px,rot_speed,beta,gamma';
+            const csv = header + '\n' + log.map(r => r.join(',')).join('\n');
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+            a.download = `handtest_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.csv`;
+            a.click();
+        };
+
+        function render(now) {
+            renderTimes.push(now);
+            renderTimes = renderTimes.filter(t => now - t < 1000);
+            detectTimes = detectTimes.filter(t => now - t < 1000);
+            seenHistory = seenHistory.filter(s => now - s.t < 5000);
+            if (now - lastGraphTime > 10000) {
+                lastGraphTime = now;
+                fpsGraph.push(detectTimes.length);
+                if (fpsGraph.length > 60) fpsGraph.shift();   // 直近10分
+            }
+
+            const W = innerWidth, H = innerHeight;
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, W, H);
+
+            if (vrMode) {
+                // 左右の目に同じ映像を出す（単眼カメラなので立体にはならない）
+                const eyeW = W / 2;
+                const vw = eyeW * vrScale, vh = H * vrScale;
+                for (let i = 0; i < 2; i++) {
+                    drawEye(i * eyeW + (eyeW - vw) / 2, (H - vh) / 2, vw, vh);
+                }
+                // 中央の仕切り
+                ctx.fillStyle = '#000';
+                ctx.fillRect(W / 2 - 1, 0, 2, H);
+            } else {
+                drawEye(0, 0, W, H);
+                drawInfo();
+            }
+            requestAnimationFrame(render);
+        }
+
+        // 映像を (x, y, w, h) の範囲を覆うように切り抜いて描き、骨格を重ねる
+        function drawEye(x, y, w, h) {
+            const vw = video.videoWidth, vh = video.videoHeight;
+            if (!vw) return;
+            const scale = Math.max(w / vw, h / vh);
+            const dw = vw * scale, dh = vh * scale;
+            const ox = x + (w - dw) / 2, oy = y + (h - dh) / 2;
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(x, y, w, h);
+            ctx.clip();
+            ctx.drawImage(video, ox, oy, dw, dh);
+
+            // 骨格。構え=黄、発射の形=赤、グリップ=水色、その他=白
+            for (const r of results) {
+                const { text: label, color } = poseLabel(r.pose);
+                const px = (p) => ox + p.x * dw, py = (p) => oy + p.y * dh;
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                for (const [a, b] of CONNECTIONS) {
+                    ctx.moveTo(px(r.lm[a]), py(r.lm[a]));
+                    ctx.lineTo(px(r.lm[b]), py(r.lm[b]));
+                }
+                ctx.stroke();
+                ctx.fillStyle = color;
+                for (const p of r.lm) {
+                    ctx.beginPath();
+                    ctx.arc(px(p), py(p), 3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                if (label) {
+                    ctx.font = 'bold 20px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.lineWidth = 4;
+                    ctx.strokeStyle = '#000';
+                    ctx.strokeText(label, px(r.lm[0]), py(r.lm[0]) + 28);
+                    ctx.fillText(label, px(r.lm[0]), py(r.lm[0]) + 28);
+                }
+            }
+
+            // VR表示でも見えるように、各目の中央寄りに最低限の数値を出す
+            if (vrMode) {
+                ctx.font = 'bold 14px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillStyle = '#0F0';
+                ctx.fillText(`検出 ${detectTimes.length}fps / 手 ${results.length}`, x + w / 2, y + h * 0.75);
+            }
+            ctx.restore();
+        }
+
+        function drawInfo() {
+            const seenRate = seenHistory.length ? seenHistory.filter(s => s.seen).length / seenHistory.length : 0;
+            const elapsed = (performance.now() - startTime) / 1000;
+            const lines = [
+                `描画 ${renderTimes.length} fps / 検出 ${detectTimes.length} fps（1回 ${lastDetectMs.toFixed(0)} ms）`,
+                `カメラ ${video.srcObject?.getVideoTracks()[0]?.label ?? '?'}`,
+                `映像 ${video.videoWidth}×${video.videoHeight} / 経過 ${Math.floor(elapsed / 60)}分${Math.floor(elapsed % 60)}秒`,
+                `手が見えている割合（直近5秒）${(seenRate * 100).toFixed(0)}%`,
+                `頭の回転 ${rotSpeed.toFixed(0)} 度/秒（上下 ${orient.beta.toFixed(0)}° 左右 ${orient.gamma.toFixed(0)}°）`,
+            ];
+            for (const r of results) {
+                lines.push(`[${r.side} ${(r.score * 100).toFixed(0)}%] 人差し指の曲がり ${r.pose.indexBend.toFixed(0)}° / 親指との角度 ${r.pose.thumbAngle.toFixed(0)}°`);
+                lines.push(`　 指の見え方 ${r.fs.toFixed(2)}（小さいほど奥向きで縮んでいる）/ 手のひら ${r.palmPx.toFixed(0)}px`);
+            }
+
+            ctx.font = '14px -apple-system, sans-serif';
+            ctx.textAlign = 'left';
+            const lh = 19;
+            ctx.fillStyle = 'rgba(0,0,0,0.55)';
+            ctx.fillRect(8, 8, 470, lines.length * lh + 12);
+            ctx.fillStyle = '#fff';
+            lines.forEach((s, i) => ctx.fillText(s, 16, 26 + i * lh));
+
+            // 検出fpsの推移（10秒ごと）。発熱で落ちていくかを見る
+            const gx = 8, gy = innerHeight - 78, gw = 240, gh = 60;
+            ctx.fillStyle = 'rgba(0,0,0,0.55)';
+            ctx.fillRect(gx, gy, gw, gh);
+            ctx.strokeStyle = '#0F0';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            fpsGraph.forEach((f, i) => {
+                const px = gx + (i / 59) * gw, py = gy + gh - Math.min(f, 60) / 60 * gh;
+                i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+            });
+            ctx.stroke();
+            ctx.fillStyle = '#fff';
+            ctx.font = '12px sans-serif';
+            ctx.fillText('検出fpsの推移（10秒ごと・上端60）', gx + 4, gy + 14);
+        }
+    </script>
+</body>
+
+</html>

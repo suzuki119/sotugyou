@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>手の骨格テスト</title>
+    <style>
+        html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: #fff; font-family: -apple-system, "Hiragino Sans", sans-serif; }
+        #view { position: fixed; inset: 0; width: 100%; height: 100%; }
+        /* カメラ映像そのものは表示しない。描くのは手の骨格だけ */
+        video { display: none; }
+    </style>
+</head>
+
+<body>
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="view"></canvas>
+
+    <script type="module">
+        import { FilesetResolver, HandLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1";
+        import { judgePose, poseLabel } from './hand.js';
+
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('view');
+        const ctx = canvas.getContext('2d');
+
+        let status = 'カメラを起動中…';
+        let results = [];          // { lm, pose, side }
+        let renderTimes = [], detectTimes = [];
+        let lastDetectMs = 0;
+
+        // -------------------------------------------------------------
+        //  カメラとモデルの準備
+        // -------------------------------------------------------------
+        resize();
+        requestAnimationFrame(render);
+
+        try {
+            video.srcObject = await navigator.mediaDevices.getUserMedia({
+                video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+                audio: false,
+            });
+            await video.play();
+        } catch (err) {
+            status = 'カメラを使えません: ' + err.name;
+            throw err;
+        }
+
+        status = 'モデルを読み込み中…';
+        const vision = await FilesetResolver.forVisionTasks(
+            'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm'
+        );
+        const landmarker = await HandLandmarker.createFromOptions(vision, {
+            baseOptions: {
+                modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+                delegate: 'GPU',
+            },
+            runningMode: 'VIDEO',
+            numHands: 2,
+        });
+        status = '';
+        scheduleDetect();
+
+        // -------------------------------------------------------------
+        //  検出ループ（新しい映像フレームが来たときだけ）
+        // -------------------------------------------------------------
+        function scheduleDetect() {
+            const next = () => { detect(); scheduleDetect(); };
+            video.requestVideoFrameCallback ? video.requestVideoFrameCallback(next) : requestAnimationFrame(next);
+        }
+
+        let lastVideoTime = -1;
+        function detect() {
+            if (video.currentTime === lastVideoTime) return;
+            lastVideoTime = video.currentTime;
+            const t0 = performance.now();
+            const r = landmarker.detectForVideo(video, t0);
+            const t1 = performance.now();
+            lastDetectMs = t1 - t0;
+            detectTimes.push(t1);
+            results = r.landmarks.map((lm, i) => ({
+                lm,
+                pose: judgePose(r.worldLandmarks[i]),
+                // 映像を鏡のように反転して表示するので、MediaPipe の Left/Right は見た目と逆になる
+                side: { Left: '右手', Right: '左手' }[r.handedness[i]?.[0]?.categoryName] ?? '?',
+            }));
+        }
+
+        // -------------------------------------------------------------
+        //  描画
+        // -------------------------------------------------------------
+        const CONNECTIONS = HandLandmarker.HAND_CONNECTIONS.map(c => [c.start, c.end]);
+
+        function resize() {
+            const dpr = devicePixelRatio || 1;
+            canvas.width = innerWidth * dpr;
+            canvas.height = innerHeight * dpr;
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        }
+        addEventListener('resize', resize);
+
+        // 映像を画面いっぱいに（縦横比を保って）広げたときの位置と大きさ
+        function layout() {
+            const vw = video.videoWidth, vh = video.videoHeight;
+            const scale = Math.max(innerWidth / vw, innerHeight / vh);
+            const dw = vw * scale, dh = vh * scale;
+            return { ox: (innerWidth - dw) / 2, oy: (innerHeight - dh) / 2, dw, dh };
+        }
+
+        function render(now) {
+            renderTimes.push(now);
+            renderTimes = renderTimes.filter(t => now - t < 1000);
+            detectTimes = detectTimes.filter(t => now - t < 1000);
+
+            const W = innerWidth, H = innerHeight;
+            ctx.fillStyle = '#101418';
+            ctx.fillRect(0, 0, W, H);
+
+            if (video.videoWidth) {
+                const L = layout();
+                // 画面上の座標に変換（左右反転込み）
+                const toScreen = (lm) => lm.map(p => ({ x: W - (L.ox + p.x * L.dw), y: L.oy + p.y * L.dh }));
+                const hands = results.map(r => ({ ...r, pts: toScreen(r.lm) }));
+
+                for (const h of hands) {
+                    const { text, color } = poseLabel(h.pose);
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = 5;
+                    ctx.lineCap = 'round';
+                    ctx.beginPath();
+                    for (const [a, b] of CONNECTIONS) {
+                        ctx.moveTo(h.pts[a].x, h.pts[a].y);
+                        ctx.lineTo(h.pts[b].x, h.pts[b].y);
+                    }
+                    ctx.stroke();
+                    ctx.fillStyle = color;
+                    for (const p of h.pts) {
+                        ctx.beginPath();
+                        ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                    // 手の下に、左右と判定結果を出す
+                    ctx.font = 'bold 22px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.lineWidth = 5;
+                    ctx.strokeStyle = '#000';
+                    const label = text ? `${h.side} ${text}` : h.side;
+                    ctx.strokeText(label, h.pts[0].x, h.pts[0].y + 36);
+                    ctx.fillStyle = color;
+                    ctx.fillText(label, h.pts[0].x, h.pts[0].y + 36);
+                }
+            }
+
+            // 状態表示
+            ctx.font = '15px sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillStyle = '#fff';
+            const lines = status ? [status] : [
+                `描画 ${renderTimes.length} fps / 検出 ${detectTimes.length} fps（1回 ${lastDetectMs.toFixed(0)} ms）`,
+                `手 ${results.length}`,
+                ...results.map(r => `${r.side}：人差し指の曲がり ${r.pose.indexBend.toFixed(0)}° / 親指との角度 ${r.pose.thumbAngle.toFixed(0)}°`),
+            ];
+            lines.forEach((s, i) => ctx.fillText(s, 16, 28 + i * 20));
+            if (!status && !results.length) {
+                ctx.font = 'bold 28px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillStyle = '#8FA3B8';
+                ctx.fillText('手をカメラに向けてください', W / 2, H / 2);
+            }
+
+            requestAnimationFrame(render);
+        }
+    </script>
+</body>
+
+</html>
