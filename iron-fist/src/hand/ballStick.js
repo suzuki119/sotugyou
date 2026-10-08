@@ -16,6 +16,14 @@ export function handFrame(p) {
     return { forward: norm(sub(p[9], p[0])), side: norm(sub(p[5], p[17])) };
 }
 
+// 指が上下どちらを向いているか（度）。+ が上向き、- が下向き、0 が水平
+//   手首→中指の付け根の向きで測る（握っていても指の付け根の位置は安定している）
+//   worldLandmarks は画像と同じく y が下向き
+export function fingerPitch(p) {
+    const f = norm(sub(p[9], p[0]));
+    return Math.asin(Math.max(-1, Math.min(1, -f.y))) * DEG;
+}
+
 // キャリブレーション中の複数フレームの向きを平均する
 export function averageFrame(frames) {
     const sum = (key) => norm(frames.reduce((s, f) => ({ x: s.x + f[key].x, y: s.y + f[key].y, z: s.z + f[key].z }), { x: 0, y: 0, z: 0 }));

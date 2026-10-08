@@ -4,7 +4,7 @@
 import { CONFIG } from '../config.js';
 import { LandmarkProcessor } from '../hand/landmarkProcessor.js';
 import { GestureDetector } from '../hand/gestureDetector.js';
-import { measureTilt, TiltSmoother } from '../hand/ballStick.js';
+import { measureTilt, TiltSmoother, fingerPitch } from '../hand/ballStick.js';
 import { OneEuroFilter } from './oneEuroFilter.js';
 
 const EMPTY = {
@@ -82,9 +82,15 @@ export class InputManager {
             const d = this.offset('left');
             input.moveX = shape(d.x / CONFIG.moveRange.x);
             const r = CONFIG.moveRange;
-            input.moveY = CONFIG.moveYMode === 'depth'
-                ? shape(d.depth / (d.depth > 0 ? r.depthForward : r.depthBack))   // 奥に押す＝前進
-                : shape(-d.y / CONFIG.moveRange.y);          // 上に動かす＝前進
+            if (CONFIG.moveYMode === 'tilt') {
+                // 基準の構えより指が下を向く（tilt が -）＝前進、上を向く＝後退
+                const t = this.leftTilt();
+                input.moveY = shape(-t / (t < 0 ? CONFIG.moveTiltRange.forward : CONFIG.moveTiltRange.back));
+            } else {
+                input.moveY = CONFIG.moveYMode === 'depth'
+                    ? shape(d.depth / (d.depth > 0 ? r.depthForward : r.depthBack))   // 奥に押す＝前進
+                    : shape(-d.y / CONFIG.moveRange.y);          // 上に動かす＝前進
+            }
             input.moveX = this.moveFilter.x.filter(input.moveX, now / 1000);
             input.moveY = this.moveFilter.y.filter(input.moveY, now / 1000);
         } else {
@@ -118,6 +124,11 @@ export class InputManager {
         this.orientAxis = null;
         this.switchedAt = 0;
         this.orientAnchor = 0;
+    }
+
+    // 左手の指の向きが、基準の構えから上下に何度傾いているか（+ が上向き）
+    leftTilt() {
+        return fingerPitch(this.hands.left.world) - (this.base.left.pitch ?? 0);
     }
 
     offset(side) {

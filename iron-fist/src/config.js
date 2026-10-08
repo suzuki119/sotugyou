@@ -39,7 +39,9 @@ export const CONFIG = {
     // aimMode が 'position' のときの上下：'depth'＝手を奥・手前に動かす / 'screen'＝画面上の上下
     aimYMode: 'depth',
     // 左手の前後移動：'screen'＝画面上の上下 / 'depth'＝奥・手前（未決定事項）
-    moveYMode: 'depth',
+    // 左手の前後移動：'tilt'＝指を上に向けると後退・下に向けると前進 / 'depth'＝奥・手前 / 'screen'＝画面上の上下
+    moveYMode: 'tilt',
+    moveTiltRange: { forward: 30, back: 25 },   // 'tilt'：基準の構えからこの角度（度）傾けると最大
 
     // 基準位置からこれだけずれたら入力が最大（±1）になる
     aimRange: { x: 0.12, y: 0.10, depth: 0.25 },  // x, y は画面の幅・高さに対する割合。depth は手の大きさの変化率

@@ -12,7 +12,7 @@ import { SceneManager } from './render/sceneManager.js';
 import { Hud } from './ui/Hud.js';
 import { Screens } from './ui/screens.js';
 import { drawHands, handStyles } from './ui/handPreview.js';
-import { handFrame, averageFrame } from './hand/ballStick.js';
+import { handFrame, averageFrame, fingerPitch } from './hand/ballStick.js';
 
 const video = document.getElementById('video');
 const keyboard = CONFIG.debug ? new DebugKeyboardInput() : null;
@@ -47,7 +47,7 @@ const TUTORIAL = [
         free: '右手のボールスティックを前後・左右に倒して、照準を動かそう',
     }[CONFIG.aimAxis], done: (i) => Math.hypot(i.aimX, i.aimY) > 0.4 },
     { title: '親指で射撃', text: 'ボールを握ったまま親指を閉じている間、連射できる。親指を離すと止まる', done: (i) => i.fire },
-    { title: '左手で移動', text: '左手をグリップしたまま、奥に押すと前進、手前に引くと後退、左右に動かすと横移動', done: (i) => Math.hypot(i.moveX, i.moveY) > 0.4 },
+    { title: '左手で移動', text: '左手を握ったまま、手首を曲げて指を下に向けると前進、上に向けると後退。左右に動かすと横移動', done: (i) => Math.hypot(i.moveX, i.moveY) > 0.4 },
 ];
 
 // -----------------------------------------------------------------
@@ -205,6 +205,7 @@ function updateCalibration(i) {
         const base = {};
         for (const side of ['left', 'right']) base[side] = { x: avg(side, 'x'), y: avg(side, 'y'), size: avg(side, 'size') };
         base.right.frame = averageFrame(samples.map((x) => handFrame(x.right.world)));   // ボールスティックの基準の傾き
+        base.left.pitch = samples.reduce((s, x) => s + fingerPitch(x.left.world), 0) / samples.length;   // 左手の基準の指の向き
         input.setBase(base);
         calibrated = true;
         setState(STATE.TUTORIAL);
@@ -251,8 +252,10 @@ function updateBones(i) {
         orientationSwitch: `照準：${input.orient.right === 'vertical' ? '縦 → 左右を操作' : '横 → 上下を操作'}`,
         free: '照準：上下左右',
     }[CONFIG.aimAxis];
-    const depth = input.base && input.hands.left
-        ? `　左手の奥行き ${(input.offset('left').depth * 100).toFixed(0)}%（前後 ${i.moveY.toFixed(2)}）` : '';
+    const depth = !(input.base && input.hands.left) ? ''
+        : CONFIG.moveYMode === 'tilt'
+            ? `　左手の指の向き ${input.leftTilt().toFixed(0)}°（前後 ${i.moveY.toFixed(2)}）`
+            : `　左手の奥行き ${(input.offset('left').depth * 100).toFixed(0)}%（前後 ${i.moveY.toFixed(2)}）`;
     bonesInfo.textContent = `${axis}${m ? `　指 ${m.curl.toFixed(0)}°　親指 ${m.thumb.toFixed(2)}` : ''}${depth}`;
 }
 
