@@ -81,8 +81,9 @@ export class InputManager {
         if (this.base && l.grip) {
             const d = this.offset('left');
             input.moveX = shape(d.x / CONFIG.moveRange.x);
+            const r = CONFIG.moveRange;
             input.moveY = CONFIG.moveYMode === 'depth'
-                ? shape(d.depth / CONFIG.moveRange.depth)    // 奥に押す＝前進
+                ? shape(d.depth / (d.depth > 0 ? r.depthForward : r.depthBack))   // 奥に押す＝前進
                 : shape(-d.y / CONFIG.moveRange.y);          // 上に動かす＝前進
             input.moveX = this.moveFilter.x.filter(input.moveX, now / 1000);
             input.moveY = this.moveFilter.y.filter(input.moveY, now / 1000);
@@ -121,7 +122,9 @@ export class InputManager {
 
     offset(side) {
         const h = this.hands[side], b = this.base[side];
-        return { x: h.x - b.x, y: h.y - b.y, depth: h.size / b.size - 1 };
+        // depth：カメラに近づいた距離の割合（+ が奥＝カメラ側）
+        //   見た目の大きさは距離に反比例するので、大きさの比のままだと奥側ばかり大きく出る。距離に直して前後をそろえる
+        return { x: h.x - b.x, y: h.y - b.y, depth: 1 - b.size / h.size };
     }
 
     setBase(base) {

@@ -43,7 +43,9 @@ export const CONFIG = {
 
     // 基準位置からこれだけずれたら入力が最大（±1）になる
     aimRange: { x: 0.12, y: 0.10, depth: 0.25 },  // x, y は画面の幅・高さに対する割合。depth は手の大きさの変化率
-    moveRange: { x: 0.10, y: 0.10, depth: 0.20 },   // depth：手の大きさが基準から20%変わると最大
+    // depthForward / depthBack：基準からカメラまでの距離の何割、奥（前進）・手前（後退）に動かすと最大か
+    //   手前には腕を引ける距離が短いので、後退側を小さく（敏感に）している
+    moveRange: { x: 0.10, y: 0.10, depthForward: 0.15, depthBack: 0.08 },
     deadzone: 0.15,
 
     smoothing: 0.45,          // 位置の平滑化（0＝なし、1に近いほどなめらかで遅い）

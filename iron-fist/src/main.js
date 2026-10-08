@@ -251,7 +251,8 @@ function updateBones(i) {
         orientationSwitch: `照準：${input.orient.right === 'vertical' ? '縦 → 左右を操作' : '横 → 上下を操作'}`,
         free: '照準：上下左右',
     }[CONFIG.aimAxis];
-    const depth = input.base && input.hands.left ? `　左手の奥行き ${(input.offset('left').depth * 100).toFixed(0)}%` : '';
+    const depth = input.base && input.hands.left
+        ? `　左手の奥行き ${(input.offset('left').depth * 100).toFixed(0)}%（前後 ${i.moveY.toFixed(2)}）` : '';
     bonesInfo.textContent = `${axis}${m ? `　指 ${m.curl.toFixed(0)}°　親指 ${m.thumb.toFixed(2)}` : ''}${depth}`;
 }
 
