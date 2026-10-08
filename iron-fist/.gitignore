@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# MediaPipe の wasm は node_modules からコピーする（scripts/copy-mediapipe.mjs）
+public/mediapipe

@@ -1,13 +1,18 @@
 <!doctype html>
-<html lang="en">
+<html lang="ja">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>iron-fist</title>
+    <title>IRON FIST</title>
   </head>
   <body>
-    <div id="app"></div>
+    <!-- カメラ映像は手認識にだけ使い、画面には出さない -->
+    <video id="video" autoplay playsinline muted></video>
+    <div id="scene"></div>
+    <div id="hud" hidden></div>
+    <div id="screen" hidden></div>
+    <div id="debug"></div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
