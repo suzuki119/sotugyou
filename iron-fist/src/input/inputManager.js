@@ -22,6 +22,7 @@ export class InputManager {
         this.base = null;                  // キャリブレーションの基準値
         this.tiltSmoother = new TiltSmoother(0.2);   // 仕上げは One Euro Filter に任せるので弱めに
         this.aimFilter = { x: new OneEuroFilter(CONFIG.aim.filter), y: new OneEuroFilter(CONFIG.aim.filter) };
+        this.moveFilter = { x: new OneEuroFilter(CONFIG.aim.filter), y: new OneEuroFilter(CONFIG.aim.filter) };
         this.tilt = null;                  // 右手ボールスティックの傾き（度）
         this.orient = { left: null, right: null };
         this.resetOrientAim();
@@ -83,6 +84,11 @@ export class InputManager {
             input.moveY = CONFIG.moveYMode === 'depth'
                 ? shape(d.depth / CONFIG.moveRange.depth)    // 奥に押す＝前進
                 : shape(-d.y / CONFIG.moveRange.y);          // 上に動かす＝前進
+            input.moveX = this.moveFilter.x.filter(input.moveX, now / 1000);
+            input.moveY = this.moveFilter.y.filter(input.moveY, now / 1000);
+        } else {
+            this.moveFilter.x.reset();
+            this.moveFilter.y.reset();
         }
         this.input = input;
     }

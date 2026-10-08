@@ -16,7 +16,7 @@ export class Hud {
             </div>
             <div class="hud-score"></div>
             <div class="hand-panel left">
-                <div class="hand-name">左手 ─ 移動・旋回</div>
+                <div class="hand-name">左手 ─ 移動</div>
                 <div class="hand-state"></div>
                 <div class="stick"><div class="stick-dot"></div></div>
             </div>

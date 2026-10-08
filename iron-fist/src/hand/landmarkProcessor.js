@@ -17,8 +17,10 @@ export class LandmarkProcessor {
             const lm = h.landmarks.map(p => ({ x: 1 - p.x, y: p.y, z: p.z }));   // 鏡のように左右反転
             const x = avg(PALM.map(i => lm[i].x));
             const y = avg(PALM.map(i => lm[i].y));
-            // 手首〜中指の付け根の長さ（画面の高さに対する割合）。カメラに近いほど大きい
-            const size = Math.hypot((lm[0].x - lm[9].x) * aspect, lm[0].y - lm[9].y);
+            // 手のひらの大きさ（画面の高さに対する割合）。カメラに近いほど大きい
+            //   手首〜中指の付け根だけだと手の傾きで変わりやすいので、手のひらの4辺の平均にする
+            const d2 = (a, b) => Math.hypot((lm[a].x - lm[b].x) * aspect, lm[a].y - lm[b].y);
+            const size = (d2(0, 9) + d2(5, 17) + d2(0, 5) + d2(0, 17)) / 4;
 
             const prev = this.state[h.side];
             const k = prev ? CONFIG.smoothing : 0;

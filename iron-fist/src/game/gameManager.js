@@ -58,7 +58,7 @@ export class GameManager {
     update(dt, input, mode) {
         this.time += dt;
         this.updateCrosshair(dt, input);
-        this.player.update(dt, input, this.crosshair);
+        this.player.update(dt, input, this.rawAim);
         this.weapon.update(dt, input.fire, this.crosshair, this.enemies, (e, dmg, at) => this.onHit(e, dmg, at), this.lock);
         this.cockpit.update(dt);
         this.cockpit.updateStick(input);

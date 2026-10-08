@@ -25,7 +25,7 @@ export const CONFIG = {
     showBones: true,
 
     // 旋回：'leftStick'＝左手の左右で旋回、前後で前進 / 'aimEdge'＝照準を画面端に寄せると旋回（左手の左右は横移動）
-    turnWith: 'leftStick',
+    turnWith: 'aimEdge',
 
     // 右手の照準：'ballstick'＝見えないボールスティックを倒す / 'position'＝手の位置のずれ
     aimMode: 'ballstick',
@@ -39,11 +39,11 @@ export const CONFIG = {
     // aimMode が 'position' のときの上下：'depth'＝手を奥・手前に動かす / 'screen'＝画面上の上下
     aimYMode: 'depth',
     // 左手の前後移動：'screen'＝画面上の上下 / 'depth'＝奥・手前（未決定事項）
-    moveYMode: 'screen',
+    moveYMode: 'depth',
 
     // 基準位置からこれだけずれたら入力が最大（±1）になる
     aimRange: { x: 0.12, y: 0.10, depth: 0.25 },  // x, y は画面の幅・高さに対する割合。depth は手の大きさの変化率
-    moveRange: { x: 0.10, y: 0.10, depth: 0.25 },
+    moveRange: { x: 0.10, y: 0.10, depth: 0.20 },   // depth：手の大きさが基準から20%変わると最大
     deadzone: 0.15,
 
     smoothing: 0.45,          // 位置の平滑化（0＝なし、1に近いほどなめらかで遅い）

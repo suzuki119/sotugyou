@@ -42,12 +42,12 @@ const game = new GameManager(sceneManager, (event) => {
 // チュートリアルの各ステップ：done(input) が true の間だけ進む
 const TUTORIAL = [
     { title: '右手で照準', text: {
-        horizontalAuto: '右手を握ったまま左右に動かして、照準を動かそう。上下は自動で敵に合わせてくれる',
+        horizontalAuto: '右手を握ったまま左右に動かして、照準を動かそう。上下は自動で敵に合う。照準を画面の端に寄せると機体が旋回する',
         orientationSwitch: '右手を縦にして左右に動かすと照準が左右に、横に寝かせて左右に動かすと上下に動く',
         free: '右手のボールスティックを前後・左右に倒して、照準を動かそう',
     }[CONFIG.aimAxis], done: (i) => Math.hypot(i.aimX, i.aimY) > 0.4 },
     { title: '親指で射撃', text: 'ボールを握ったまま親指を閉じている間、連射できる。親指を離すと止まる', done: (i) => i.fire },
-    { title: '左手で移動', text: '左手をグリップしたまま、前後に動かすと前進・後退、左右に動かすと旋回', done: (i) => Math.hypot(i.moveX, i.moveY) > 0.4 },
+    { title: '左手で移動', text: '左手をグリップしたまま、奥に押すと前進、手前に引くと後退、左右に動かすと横移動', done: (i) => Math.hypot(i.moveX, i.moveY) > 0.4 },
 ];
 
 // -----------------------------------------------------------------
@@ -251,7 +251,8 @@ function updateBones(i) {
         orientationSwitch: `照準：${input.orient.right === 'vertical' ? '縦 → 左右を操作' : '横 → 上下を操作'}`,
         free: '照準：上下左右',
     }[CONFIG.aimAxis];
-    bonesInfo.textContent = `${axis}${m ? `　指 ${m.curl.toFixed(0)}°　親指 ${m.thumb.toFixed(2)}　向き ${m.upright.toFixed(0)}°` : ''}`;
+    const depth = input.base && input.hands.left ? `　左手の奥行き ${(input.offset('left').depth * 100).toFixed(0)}%` : '';
+    bonesInfo.textContent = `${axis}${m ? `　指 ${m.curl.toFixed(0)}°　親指 ${m.thumb.toFixed(2)}` : ''}${depth}`;
 }
 
 function hudLabel() {
