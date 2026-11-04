@@ -3,7 +3,6 @@
 import * as THREE from 'three';
 import { segmentHitsSphere } from '../weapon.js';
 
-const PLAYER_RADIUS = 3;
 const geo = new THREE.SphereGeometry(0.6, 10, 8);
 const mat = new THREE.MeshBasicMaterial({ color: 0xff5a3c });
 
@@ -20,17 +19,21 @@ export class EnemyBullets {
         this.list.push({ mesh, vel: to.clone().sub(from).setLength(speed), damage, life: 6 });
     }
 
-    // プレイヤーに当たった弾のダメージ合計を返す
-    update(dt, eye) {
+    // targets：[{ position, radius, scale }]（プレイヤー、共闘モードではロボットも）
+    // 当たった弾のダメージ合計（scale を掛けたもの）を返す
+    update(dt, targets) {
         let damage = 0;
         const prev = new THREE.Vector3();
         for (const b of this.list) {
             prev.copy(b.mesh.position);
             b.mesh.position.addScaledVector(b.vel, dt);
             b.life -= dt;
-            if (segmentHitsSphere(prev, b.mesh.position, eye, PLAYER_RADIUS)) {
-                damage += b.damage;
-                b.life = 0;
+            for (const t of targets) {
+                if (segmentHitsSphere(prev, b.mesh.position, t.position, t.radius)) {
+                    damage += b.damage * t.scale;
+                    b.life = 0;
+                    break;
+                }
             }
         }
         this.list = this.list.filter((b) => {

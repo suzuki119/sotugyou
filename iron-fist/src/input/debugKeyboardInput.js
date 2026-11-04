@@ -1,6 +1,6 @@
 // 開発用の入力（手を使わずにゲームロジックを確かめるため）。展示版では無効
 //   K：手入力 ⇄ キーボード入力の切り替え
-//   マウス：照準 / クリック or Space：射撃 / WASD：移動
+//   マウス：照準・剣の位置 / クリック or Space：射撃・剣で斬る / WASD：移動 / E 長押し：モード切り替え（両手パー）
 
 export class DebugKeyboardInput {
     constructor() {
@@ -32,6 +32,9 @@ export class DebugKeyboardInput {
             moveX: k('KeyD') - k('KeyA'),
             moveY: k('KeyW') - k('KeyS'),
             rightGrip: true, leftGrip: true, rightTracked: true, leftTracked: true,
+            leftOpen: this.keys.has('KeyE'), rightOpen: this.keys.has('KeyE'),
+            handX: this.aim.x, handY: this.aim.y,
+            swing: 0, swingX: 0, swingY: 0,
         };
     }
 }

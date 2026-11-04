@@ -1,4 +1,4 @@
-// 手の形の判定：グリップ（4本指を握る）と親指（立てる / 閉じる）
+// 手の形の判定：グリップ（4本指を握る）・親指（立てる / 閉じる）・パー（モード切り替え）
 //   計算は desktoptest/hand.js と同じく worldLandmarks（3D・メートル）で行う
 //   しきい値はすべて仮。デバッグ表示の値を見ながら調整する
 
@@ -53,12 +53,15 @@ export class GestureDetector {
         if (!hand) {
             this.grip[side] = false;
             if (side === 'right') { this.fire = false; this.thumbClosed = false; }
-            return { grip: false, fire: false, orient: null, metrics: null };
+            return { grip: false, fire: false, open: false, orient: null, metrics: null };
         }
         const m = measure(hand.world);
         if (m.upright >= UPRIGHT_ON) this.orient[side] = 'vertical';
         else if (m.upright <= UPRIGHT_OFF) this.orient[side] = 'horizontal';
         const orient = this.orient[side];
+        // パー（モード切り替え）：しきい値は CONFIG.modeSwitch
+        const o = CONFIG.modeSwitch;
+        const open = m.folded === 0 && m.curl <= o.maxCurl && m.thumb >= o.minThumb;
 
         // ヒステリシス：ON と OFF の境界を分けて、状態が細かく切り替わらないようにする
         if (side === 'right' && CONFIG.aimMode === 'ballstick') {
@@ -67,7 +70,7 @@ export class GestureDetector {
         } else if (m.folded >= GRIP_ON) this.grip[side] = true;
         else if (m.folded < GRIP_OFF) this.grip[side] = false;
 
-        if (side === 'left') return { grip: this.grip.left, fire: false, orient, metrics: m };
+        if (side === 'left') return { grip: this.grip.left, fire: false, open, orient, metrics: m };
 
         if (m.thumb <= THUMB_DOWN) this.thumbClosed = true;
         else if (m.thumb >= THUMB_UP) this.thumbClosed = false;
@@ -82,6 +85,6 @@ export class GestureDetector {
             this.thumbUpSince ||= now;
             if (now - this.thumbUpSince > CONFIG.thumbGraceMs) this.fire = false;
         }
-        return { grip: this.grip.right, fire: this.fire, orient, metrics: m };
+        return { grip: this.grip.right, fire: this.fire, open, orient, metrics: m };
     }
 }

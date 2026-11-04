@@ -1,16 +1,20 @@
-// ボス：HP が半分を切ると攻撃が激しくなる
+// ボス（robot_boss.glb）：地上を歩く大型。HP が半分を切ると攻撃が激しくなる
 
 import * as THREE from 'three';
 import { EnemyBase } from './enemyBase.js';
 
 export class Boss extends EnemyBase {
     constructor() {
-        super({ hp: 800, radius: 8, score: 3000 });
-        const core = new THREE.Mesh(new THREE.IcosahedronGeometry(6, 1), this.material(0x8e44ad));
-        const ring = new THREE.Mesh(new THREE.TorusGeometry(10, 0.8, 8, 32), this.material(0x34495e));
-        this.object.add(core, ring);
-        this.core = core;
-        this.ring = ring;
+        super({ hp: 800, radius: 9, score: 3000 });
+        if (this.useModel('boss')) {
+            this.groundY = this.rig.lift;   // 当たり判定の中心＝胴体の高さ
+        } else {
+            // 仮の形（宙に浮く）
+            this.radius = 8;
+            this.core = new THREE.Mesh(new THREE.IcosahedronGeometry(6, 1), this.material(0x8e44ad));
+            this.ring = new THREE.Mesh(new THREE.TorusGeometry(10, 0.8, 8, 32), this.material(0x34495e));
+            this.object.add(this.core, this.ring);
+        }
         this.cooldown = 2;
         this.stream = 0;
         this.strafe = 1;
@@ -23,14 +27,20 @@ export class Boss extends EnemyBase {
     behave(dt, { eye, bullets }) {
         if (Math.random() < dt * 0.3) this.strafe *= -1;
         this.keepDistance(dt, eye, 60, this.angry ? 16 : 10, this.strafe);
-        this.position.y = 16 + Math.sin(this.age) * 3;
-        this.core.rotation.y += dt;
-        this.ring.rotation.x += dt * (this.angry ? 3 : 1);
+        if (this.rig) {
+            this.position.y = this.groundY;
+            this.object.lookAt(eye.x, this.position.y, eye.z);
+        } else {
+            this.position.y = 16 + Math.sin(this.age) * 3;
+            this.core.rotation.y += dt;
+            this.ring.rotation.x += dt * (this.angry ? 3 : 1);
+        }
 
         // 攻撃A：扇形に5発
         this.cooldown -= dt;
         if (this.cooldown <= 0) {
             this.cooldown = this.angry ? 1.6 : 2.4;
+            this.attack();
             const to = eye.clone().sub(this.position);
             for (let i = -2; i <= 2; i++) {
                 const dir = to.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), i * 0.12);

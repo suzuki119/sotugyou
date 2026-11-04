@@ -15,13 +15,19 @@ export class Hud {
                 <div class="boss-bar"><div class="bar-fill"></div><span>BOSS</span></div>
             </div>
             <div class="hud-score"></div>
+            <div class="mode-badge">
+                <div class="mode-name"></div>
+                <div class="mode-hint">両手パーで切り替え</div>
+                <div class="progress"><div class="bar-fill"></div></div>
+            </div>
+            <div class="mode-flash"></div>
             <div class="hand-panel left">
-                <div class="hand-name">左手 ─ 移動</div>
+                <div class="hand-name"></div>
                 <div class="hand-state"></div>
                 <div class="stick"><div class="stick-dot"></div></div>
             </div>
             <div class="hand-panel right">
-                <div class="hand-name">右手 ─ 照準・射撃</div>
+                <div class="hand-name"></div>
                 <div class="hand-state"></div>
                 <div class="fire-lamp">FIRE</div>
             </div>
@@ -47,15 +53,43 @@ export class Hud {
             bones: $('.bones'),
             bonesCanvas: $('.bones canvas'),
             bonesInfo: $('.bones-info'),
+            modeName: $('.mode-name'),
+            modeFill: $('.mode-badge .bar-fill'),
+            modeFlash: $('.mode-flash'),
+            leftName: $('.hand-panel.left .hand-name'),
+            rightName: $('.hand-panel.right .hand-name'),
         };
+        this.mode = null;
     }
 
     show(visible) {
         this.root.hidden = !visible;
     }
 
+    // モードが切り替わった瞬間に、画面中央に大きく出す
+    modeChanged(mode) {
+        const f = this.el.modeFlash;
+        this.root.dataset.mode = mode;
+        f.textContent = MODES[mode].flash;
+        f.classList.remove('show');
+        void f.offsetWidth;   // アニメーションを最初から再生し直す
+        f.classList.add('show');
+    }
+
     update(input, game, label) {
         const el = this.el;
+        const coop = game.mode === 'coop';
+        if (this.mode !== game.mode) {
+            this.mode = game.mode;
+            const m = MODES[game.mode];
+            el.modeName.textContent = m.name;
+            el.leftName.textContent = m.left;
+            el.rightName.textContent = m.right;
+            el.fire.textContent = m.fire;
+            this.root.dataset.mode = game.mode;
+        }
+        el.modeFill.style.width = `${game.switchProgress * 100}%`;
+        el.crosshair.hidden = coop || game.boarding.running;   // 乗り降りの演出中は照準を出さない
         const a = game.crosshair;
         el.crosshair.style.left = `${(a.x + 1) * 50}%`;
         el.crosshair.style.top = `${(1 - a.y) * 50}%`;
@@ -65,7 +99,7 @@ export class Hud {
         handState(el.left, el.leftState, input.leftTracked, input.leftGrip);
         handState(el.right, el.rightState, input.rightTracked, input.rightGrip);
         el.stickDot.style.transform = `translate(${input.moveX * 28}px, ${-input.moveY * 28}px)`;
-        el.fire.classList.toggle('on', input.fire);
+        el.fire.classList.toggle('on', coop ? game.sword.swingT < 1 : input.fire);
 
         el.label.textContent = label;
         el.score.textContent = `SCORE ${game.score}　TIME ${formatTime(game.time)}`;
@@ -76,6 +110,11 @@ export class Hud {
         el.flash.style.opacity = game.damageFlash > 0 ? game.damageFlash * 2 : 0;
     }
 }
+
+const MODES = {
+    ride: { name: '搭乗モード', flash: 'RIDE', left: '左手 ─ 移動', right: '右手 ─ 照準・射撃', fire: 'FIRE' },
+    coop: { name: '共闘モード', flash: 'CO-OP', left: '左手 ─ 旋回・移動', right: '右手 ─ 剣', fire: 'SLASH' },
+};
 
 function handState(panel, text, tracked, grip) {
     panel.dataset.state = !tracked ? 'lost' : grip ? 'grip' : 'open';

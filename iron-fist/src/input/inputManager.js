@@ -10,6 +10,9 @@ import { OneEuroFilter } from './oneEuroFilter.js';
 const EMPTY = {
     aimX: 0, aimY: 0, fire: false, moveX: 0, moveY: 0,
     rightGrip: false, leftGrip: false, rightTracked: false, leftTracked: false,
+    leftOpen: false, rightOpen: false,      // パー（モード切り替え）
+    handX: 0, handY: 0,                     // 右手の位置（基準からのずれ、-1〜1）：共闘モードの剣の位置
+    swing: 0, swingX: 0, swingY: 0,         // 右手を振る速さ（画面の高さ／秒）と向き（右・上が +）
 };
 
 export class InputManager {
@@ -23,6 +26,9 @@ export class InputManager {
         this.tiltSmoother = new TiltSmoother(0.2);   // 仕上げは One Euro Filter に任せるので弱めに
         this.aimFilter = { x: new OneEuroFilter(CONFIG.aim.filter), y: new OneEuroFilter(CONFIG.aim.filter) };
         this.moveFilter = { x: new OneEuroFilter(CONFIG.aim.filter), y: new OneEuroFilter(CONFIG.aim.filter) };
+        this.swordFilter = { x: new OneEuroFilter(CONFIG.aim.filter), y: new OneEuroFilter(CONFIG.aim.filter) };
+        this.prevRight = null;             // 右手を振る速さを出すための、前回の位置
+        this.swing = { speed: 0, x: 0, y: 0 };
         this.tilt = null;                  // 右手ボールスティックの傾き（度）
         this.orient = { left: null, right: null };
         this.resetOrientAim();
@@ -45,6 +51,9 @@ export class InputManager {
         input.rightGrip = r.grip;
         input.leftGrip = l.grip;
         input.fire = r.fire;
+        input.leftOpen = l.open;
+        input.rightOpen = r.open;
+        this.updateSwing(input, aspect, now);
 
         // 基準位置がない（キャリブレーション前）か、グリップしていない手の入力は 0
         this.tilt = this.tiltSmoother.update(
@@ -98,6 +107,36 @@ export class InputManager {
             this.moveFilter.y.reset();
         }
         this.input = input;
+    }
+
+    // 右手を振る速さと向き（剣）。剣の位置は基準位置からのずれ
+    updateSwing(input, aspect, now) {
+        const h = this.hands.right;
+        if (!h) {
+            this.prevRight = null;
+            this.swing = { speed: 0, x: 0, y: 0 };
+            this.swordFilter.x.reset();
+            this.swordFilter.y.reset();
+            return;
+        }
+        if (this.prevRight) {
+            const dt = Math.max(0.001, (now - this.prevRight.t) / 1000);
+            const vx = ((h.x - this.prevRight.x) * aspect) / dt, vy = -(h.y - this.prevRight.y) / dt;
+            const speed = Math.hypot(vx, vy);
+            // 速さは少しだけ平滑化（1フレームの誤検出で斬らないように）
+            this.swing.speed = this.swing.speed * 0.3 + speed * 0.7;
+            if (speed > 0.2) this.swing.x = vx / speed, this.swing.y = vy / speed;
+        }
+        this.prevRight = { x: h.x, y: h.y, t: now };
+        input.swing = this.swing.speed;
+        input.swingX = this.swing.x;
+        input.swingY = this.swing.y;
+        if (this.base) {
+            const d = this.offset('right'), range = CONFIG.sword.handRange;
+            const clamp = (v) => Math.max(-1, Math.min(1, v));
+            input.handX = this.swordFilter.x.filter(clamp(d.x / range), now / 1000);
+            input.handY = this.swordFilter.y.filter(clamp(-d.y / range), now / 1000);
+        }
     }
 
     // 手の向きで軸を切り替える照準：動かしていない方の軸は値を保つ
