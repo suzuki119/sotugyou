@@ -100,7 +100,7 @@ export class GameManager {
         }
         this.companion.updateTracers(dt);
         this.cockpit.update(dt);
-        this.cockpit.updateStick(input);
+        this.cockpit.updateStick(input, dt);
         this.updateEffects(dt);
         this.updateDying(dt);
         this.stage.update(dt);

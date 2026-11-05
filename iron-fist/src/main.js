@@ -354,7 +354,7 @@ requestAnimationFrame(frame);
 try {
     // ロボットのモデルは読み込めなくてもゲームは遊べる（演出が出ないだけ）
     const robotLoad = robot.load(sceneManager.renderer).catch((err) => console.error('ロボットのモデルを読み込めませんでした', err));
-    await Promise.all([tracker.init(), robotLoad, loadEnemyModels(), game.stage.load()]);   // 敵のモデルも、読み込めなければ仮の形で遊べる
+    await Promise.all([tracker.init(), robotLoad, loadEnemyModels(), game.stage.load(), game.cockpit.load(sceneManager.envMap)]);   // 敵のモデルも、読み込めなければ仮の形で遊べる
     setState(STATE.START);
 } catch (err) {
     console.error(err);
