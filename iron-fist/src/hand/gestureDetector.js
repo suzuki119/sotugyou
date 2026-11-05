@@ -43,6 +43,7 @@ export class GestureDetector {
     reset() {
         this.grip = { left: false, right: false };
         this.thumbClosed = false;
+        this.leftThumbClosed = false;   // 左手の親指（コックピットの操縦桿のボタンの見た目だけに使う）
         this.fire = false;
         this.thumbUpSince = 0;
         this.orient = { left: 'horizontal', right: 'horizontal' };
@@ -70,7 +71,11 @@ export class GestureDetector {
         } else if (m.folded >= GRIP_ON) this.grip[side] = true;
         else if (m.folded < GRIP_OFF) this.grip[side] = false;
 
-        if (side === 'left') return { grip: this.grip.left, fire: false, open, orient, metrics: m };
+        if (side === 'left') {
+            if (m.thumb <= THUMB_DOWN) this.leftThumbClosed = true;
+            else if (m.thumb >= THUMB_UP) this.leftThumbClosed = false;
+            return { grip: this.grip.left, fire: false, thumb: this.grip.left && this.leftThumbClosed, open, orient, metrics: m };
+        }
 
         if (m.thumb <= THUMB_DOWN) this.thumbClosed = true;
         else if (m.thumb >= THUMB_UP) this.thumbClosed = false;

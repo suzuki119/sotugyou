@@ -1,8 +1,8 @@
 // コックピット：カメラの子にして、常に画面手前に見えるようにする（搭乗モードだけ表示）
-//   flame.glb：窓枠 / stick_controller.glb：左手の移動スティック / handle_controller.glb：右手の照準ハンドル
+//   flame.glb：窓枠 / handle_controller.glb：左手の移動ハンドル / stick_controller.glb：右手の照準スティック（操縦桿）
 //   コントローラーは手の動きに合わせて動かす
-//     左スティック：手の左右（moveX）で左右にスライドして傾く、指の傾き（moveY）で前後にスライドして傾く
-//     右ハンドル：照準の左右（aimX。右手を左右に動かす）に合わせてハンドルをひねり、左右に振る
+//     左ハンドル：前進・後退（moveY）でアクセルのようにひねる、左右（moveX）で握りの先を左右に振る
+//     右スティック：照準の左右・上下（aimX / aimY）に合わせてスライドして傾く
 //   モデルが読み込めないときは仮の窓枠（グレーボックス）にする
 
 import * as THREE from 'three';
@@ -16,7 +16,7 @@ const FRAME_DIST = 1.0;       // 窓枠を置く距離（カメラの前へ）
 const FRAME_OVERSCAN = 1.8;   // 窓枠の大きさ（画面にちょうど収まる大きさに対する倍率。大きいほど枠が外に広がる）
 // コントローラーの置き場所（カメラ座標。台の中心をここに合わせる）と大きさ
 const CONTROLLER = { x: 0.42, y: -0.8, z: -1.05, scale: 1.0, tiltX: 0.35 };
-const TWIST_MAX = THREE.MathUtils.degToRad(100);   // ハンドルをひねる最大の角度
+const TWIST_MAX = THREE.MathUtils.degToRad(60);    // ハンドルをひねる最大の角度
 const STICK_TILT = { x: THREE.MathUtils.degToRad(15), y: THREE.MathUtils.degToRad(12) };   // スティックを倒す最大の角度（左右・前後）
 const SWING_MAX = THREE.MathUtils.degToRad(25);    // ハンドルを左右に振る最大の角度（ひねりだけだと見えにくいので）
 const UP = new THREE.Vector3(0, 1, 0);
@@ -31,7 +31,7 @@ export class Cockpit {
         this.camera = camera;
         this.group = new THREE.Group();
         camera.add(this.group);
-        this.input = { moveX: 0, moveY: 0, twist: 0 };   // なめらかにした入力
+        this.input = { moveX: 0, moveY: 0, aimX: 0, aimY: 0 };   // なめらかにした入力
         this.stick = null;
         this.handle = null;
         this.frame = null;
@@ -92,10 +92,10 @@ export class Cockpit {
             this.group.add(this.frame);
             this.placeholder.visible = false;
         }
-        if (stick) this.stick = this.setupController(stick, -1, {
+        if (stick) this.stick = this.setupController(stick, 1, {
             x: 'Stick_X', y: 'Stick_Y', light: ['Stick_L_LightBand', 'Deck_L_Light'],
         });
-        if (handle) this.handle = this.setupController(handle, 1, {
+        if (handle) this.handle = this.setupController(handle, -1, {
             twist: 'Handle_Twist', light: ['Handle_R_CyanRing'],
         });
     }
@@ -146,32 +146,35 @@ export class Cockpit {
         const s = this.input;
         s.moveX += ((input.moveX ?? 0) - s.moveX) * k;
         s.moveY += ((input.moveY ?? 0) - s.moveY) * k;
-        s.twist += ((input.aimX ?? 0) - s.twist) * k;
+        s.aimX += ((input.aimX ?? 0) - s.aimX) * k;
+        s.aimY += ((input.aimY ?? 0) - s.aimY) * k;
 
         // クリップの時刻：真ん中が中立。左右（前後）いっぱいで端の時刻
         const seek = (c, v) => {
             if (!c) return;
             c.a.time = (THREE.MathUtils.clamp(v, -1, 1) * 0.5 + 0.5) * c.duration;
         };
+        // 右手：照準のスティック（照準を下げる＝手前に倒す＝操縦桿方式で aimY が - のとき奥へ）
         if (this.stick) {
-            seek(this.stick.x, s.moveX);
-            seek(this.stick.y, s.moveY);   // 前に倒す（前進）＝奥へ
+            seek(this.stick.x, s.aimX);
+            seek(this.stick.y, -s.aimY);
             this.stick.mixer.update(0);
-            // スライドだけだと動きが小さく見えにくいので、スティック自体も倒す（右へ＝右に、前進＝奥に）
-            if (this.stick.lever) this.stick.lever.rotation.set(-s.moveY * STICK_TILT.y, 0, -s.moveX * STICK_TILT.x);
-            this.setLights(this.stick, stateColor(input.leftTracked, input.leftGrip, false));
+            // スライドだけだと動きが小さく見えにくいので、スティック自体も倒す（右へ＝右に）
+            if (this.stick.lever) this.stick.lever.rotation.set(s.aimY * STICK_TILT.y, 0, -s.aimX * STICK_TILT.x);
+            this.setLights(this.stick, stateColor(input.rightTracked, input.rightGrip, input.fire));
         }
+        // 左手：移動のハンドル
         if (this.handle) {
             // Handle_Twist は 1 周（0〜duration）。真ん中ではなく 0 が中立なので、角度から時刻を出す
             const c = this.handle.twist;
             if (c) {
-                const angle = -s.twist * TWIST_MAX;   // 右へ＝ハンドルの上側が奥へ
+                const angle = -s.moveY * TWIST_MAX;   // 前進＝ハンドルの上側が奥へ（アクセルを回す向き）
                 c.a.time = THREE.MathUtils.euclideanModulo(angle / (Math.PI * 2), 1) * c.duration;
             }
             this.handle.mixer.update(0);
             // 握りの先を左右に振る（右へ＝先が奥へ）。クリップで決めたひねりに重ねる
-            this.handle.grip?.quaternion.premultiply(swingQ.setFromAxisAngle(UP, s.twist * SWING_MAX));
-            this.setLights(this.handle, stateColor(input.rightTracked, input.rightGrip, input.fire));
+            this.handle.grip?.quaternion.premultiply(swingQ.setFromAxisAngle(UP, s.moveX * SWING_MAX));
+            this.setLights(this.handle, stateColor(input.leftTracked, input.leftGrip, false));
         }
     }
 
