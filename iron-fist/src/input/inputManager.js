@@ -11,8 +11,6 @@ const EMPTY = {
     aimX: 0, aimY: 0, fire: false, moveX: 0, moveY: 0,
     rightGrip: false, leftGrip: false, rightTracked: false, leftTracked: false,
     leftOpen: false, rightOpen: false,      // パー（モード切り替え）
-    rightRoll: 0,                           // 右手首を左右にひねった量（-1〜1、右が +）：コックピットのハンドルの見た目
-    leftThumb: false,                       // 左手の親指を倒している：コックピットの操縦桿のボタンの見た目
     handX: 0, handY: 0,                     // 右手の位置（基準からのずれ、-1〜1）：共闘モードの剣の位置
     swing: 0, swingX: 0, swingY: 0,         // 右手を振る速さ（画面の高さ／秒）と向き（右・上が +）
 };
@@ -54,7 +52,6 @@ export class InputManager {
         input.leftGrip = l.grip;
         input.fire = r.fire;
         input.leftOpen = l.open;
-        input.leftThumb = !!l.thumb;
         input.rightOpen = r.open;
         this.updateSwing(input, aspect, now);
 
@@ -64,7 +61,6 @@ export class InputManager {
 
         if (this.base && r.grip) {
             const d = this.offset('right');
-            if (this.tilt) input.rightRoll = Math.max(-1, Math.min(1, this.tilt.roll / CONFIG.ballStick.rollRange));
             if (CONFIG.aimAxis === 'horizontalAuto') {
                 input.aimX = shape(d.x / CONFIG.aimRange.x);
                 input.aimY = 0;   // 上下はゲーム側で自動

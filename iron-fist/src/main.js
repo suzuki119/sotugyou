@@ -11,6 +11,7 @@ import { GameManager } from './game/gameManager.js';
 import { SceneManager } from './render/sceneManager.js';
 import { RobotModel } from './render/robotModel.js';
 import { loadEnemyModels } from './render/enemyModels.js';
+import { CockpitDebug } from './render/cockpitDebug.js';
 import { Hud } from './ui/Hud.js';
 import { Screens } from './ui/screens.js';
 import { drawHands, handStyles } from './ui/handPreview.js';
@@ -44,6 +45,8 @@ const game = new GameManager(sceneManager, robot, (event, data) => {
     if (event === 'clear') setState(STATE.CLEAR);
     if (event === 'gameover') setState(STATE.GAME_OVER);
 });
+if (CONFIG.debug) new CockpitDebug(game.cockpit);   // C キーでコックピットの値を直接動かす
+
 
 // チュートリアルの各ステップ：done(input, game) が true の間だけ進む
 const TUTORIAL = [

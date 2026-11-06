@@ -13,6 +13,7 @@ const WALK_SPEED = 8;        // 乗りに行くときに歩く速さ（m/s）
 const KEEP_OUT = 6;          // 歩くときにロボットの中心からこれ以上は近づかない（m）
 const KNEEL = 2.0;           // Mount クリップ（片膝をつく）の長さ
 const HATCH = 1.04;          // HatchOpen / HatchClose の長さ
+const FADE = 0.4;            // コックピットの内装が現れる・消える時間
 
 const smooth = (t) => t * t * (3 - 2 * t);
 const clamp01 = (t) => Math.min(1, Math.max(0, t));
@@ -83,15 +84,30 @@ export class Boarding {
                     this.view(at, lerpAngle(faceIn, robotYaw, turn), pitch);
                 },
             },
-            // 中からハッチが閉まるのを見る
-            { time: HATCH + 0.3, enter: () => r.hatch(false), run: () => this.view(this.seat(), robotYaw, 0) },
-            // 立ち上がる：コックピットの表示に切り替え、目線が上がる
+            // 中からハッチが閉まるのを見る。コックピットの枠も上から下りてきて閉まる
+            {
+                time: HATCH + 0.3,
+                enter: () => {
+                    r.hatch(false);
+                    this.cockpit.setOpen(1);
+                    this.cockpit.setFade(0);
+                    this.cockpit.group.visible = true;
+                },
+                run: (t, dt, sec) => {
+                    this.cockpit.setFade(clamp01(sec / FADE));   // 内装はすっと現れる
+                    this.cockpit.setOpen(1 - smooth(clamp01(sec / HATCH)));
+                    this.view(this.seat(), robotYaw, 0);
+                },
+            },
+            // 立ち上がる：外のロボットは消して、コックピットの中だけにする。目線が上がる
             {
                 time: 1.2,
                 enter: () => {
                     s.from = this.seat();
                     r.object.visible = false;
-                    this.cockpit.group.visible = true;
+                    this.cockpit.setOpen(0);
+        this.cockpit.setFade(1);
+                    this.cockpit.setFade(1);
                     r.play('Stand', { fade: 1.0 });
                 },
                 run: (t) => {
@@ -123,22 +139,34 @@ export class Boarding {
                     this.view(from.lerp(this.seat(), smooth(t)), robotYaw, 0);
                 },
             },
-            // ハッチが開く（外から見たロボットの表示に切り替える）
+            // ハッチが開く。コックピットの枠も一緒に跳ね上がって開き、外のロボットが見えてくる
             {
                 time: HATCH + 0.2,
                 enter: () => {
                     r.object.visible = r.ready;
                     r.animateHidden = false;
-                    this.cockpit.group.visible = false;
                     r.hatch(true);
                 },
-                run: () => this.view(this.seat(), robotYaw, 0),
+                run: (t, dt, sec) => {
+                    this.cockpit.setOpen(smooth(clamp01(sec / HATCH)));
+                    this.view(this.seat(), robotYaw, 0);
+                },
             },
             // 外へ出て、地面に降りながら振り返る
             {
                 time: 1.8,
                 enter: () => { s.from = this.seat(); },
-                run: (t) => {
+                run: (t, dt, sec) => {
+                    // 立ち上がって外へ出るあいだに、コックピットの内装はすっと消える
+                    if (this.cockpit.group.visible) {
+                        const a = 1 - clamp01(sec / FADE);
+                        this.cockpit.setFade(a);
+                        if (a <= 0) {
+                            this.cockpit.group.visible = false;
+                            this.cockpit.setOpen(0);
+                            this.cockpit.setFade(1);
+                        }
+                    }
                     const k = smooth(t);
                     const at = s.from.clone().lerp(front, k);
                     at.y += Math.sin(k * Math.PI) * 0.8;
@@ -200,6 +228,7 @@ export class Boarding {
     // 途中でやめる（リセットなど）
     cancel() {
         this.active = null;
+        this.cockpit.setOpen(0);
         this.robot.animateHidden = false;
         this.player.camera.rotation.x = 0;
     }
