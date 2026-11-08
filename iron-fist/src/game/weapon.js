@@ -1,7 +1,9 @@
 // 自機の武器：親指を閉じている間、左右の銃から交互に連射する
+//   1発ごとにエネルギーを消費し、撃たずにいると自動で回復する（CONFIG.energy）
 
 import * as THREE from 'three';
 import { MUZZLES } from '../render/cockpit.js';
+import { CONFIG } from '../config.js';
 
 const FIRE_RATE = 10;       // 発/秒
 const SPEED = 220;          // m/s
@@ -21,16 +23,33 @@ export class Weapon {
         this.cooldown = 0;
         this.side = 0;
         this.raycaster = new THREE.Raycaster();
+        this.resetEnergy();
+    }
+
+    resetEnergy() {
+        this.energy = CONFIG.energy.max;
+        this.overheat = false;     // 撃ち切ったら、ある程度回復するまで撃てない
+        this.sinceShot = Infinity; // 最後に撃ってからの秒数
     }
 
     // aim は照準の画面上の位置（-1〜1）
     // lock：エイムアシストで捉えている敵（いればその敵に向けて撃つ）
     update(dt, firing, aim, enemies, onHit, lock) {
+        const E = CONFIG.energy;
         this.cooldown -= dt;
-        if (firing && this.cooldown <= 0) {
+        this.sinceShot += dt;
+        if (firing && !this.overheat && this.cooldown <= 0 && this.energy > 0) {
             this.cooldown = 1 / FIRE_RATE;
+            this.energy = Math.max(0, this.energy - E.costPerShot);
+            this.sinceShot = 0;
+            if (this.energy <= 0) this.overheat = true;
             this.spawn(aim, enemies, lock);
         }
+        // 撃っていなければ回復（オーバーヒート中は親指を閉じたままでも回復する）
+        if ((!firing || this.overheat) && this.sinceShot * 1000 >= E.regenDelayMs) {
+            this.energy = Math.min(E.max, this.energy + E.regenPerSec * dt);
+        }
+        if (this.overheat && this.energy >= E.resumeAt) this.overheat = false;
 
         const prev = new THREE.Vector3();
         for (const b of this.bullets) {
@@ -83,6 +102,7 @@ export class Weapon {
 
     clear() {
         this.removeWhere(() => true);
+        this.resetEnergy();
     }
 }
 

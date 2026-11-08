@@ -1,6 +1,7 @@
 // HUD：カメラ映像を出さない代わりに、手の状態・照準・HP を計器として見せる
 
 import { MAX_HP } from '../game/player.js';
+import { CONFIG } from '../config.js';
 
 export class Hud {
     constructor(root) {
@@ -31,6 +32,7 @@ export class Hud {
                 <div class="hand-state"></div>
                 <div class="fire-lamp">FIRE</div>
             </div>
+            <div class="energy-bar"><span>EN</span><div class="bar-fill"></div><em>OVERHEAT</em></div>
             <div class="hp-bar"><span>HP</span><div class="bar-fill"></div></div>
             <div class="damage-flash"></div>
         `;
@@ -43,6 +45,8 @@ export class Hud {
             bossBar: $('.boss-bar'),
             bossFill: $('.boss-bar .bar-fill'),
             hpFill: $('.hp-bar .bar-fill'),
+            energyBar: $('.energy-bar'),
+            energyFill: $('.energy-bar .bar-fill'),
             left: $('.hand-panel.left'),
             right: $('.hand-panel.right'),
             leftState: $('.hand-panel.left .hand-state'),
@@ -93,13 +97,18 @@ export class Hud {
         const a = game.crosshair;
         el.crosshair.style.left = `${(a.x + 1) * 50}%`;
         el.crosshair.style.top = `${(1 - a.y) * 50}%`;
-        el.crosshair.classList.toggle('firing', input.fire);
+        el.crosshair.classList.toggle('firing', input.fire && !game.weapon.overheat);
         el.crosshair.classList.toggle('locked', !!game.lock);
 
         handState(el.left, el.leftState, input.leftTracked, input.leftGrip);
         handState(el.right, el.rightState, input.rightTracked, input.rightGrip);
         el.stickDot.style.transform = `translate(${input.moveX * 28}px, ${-input.moveY * 28}px)`;
-        el.fire.classList.toggle('on', coop ? game.sword.swingT < 1 : input.fire);
+        const w = game.weapon;
+        const shooting = input.fire && !w.overheat;
+        el.fire.classList.toggle('on', coop ? game.sword.swingT < 1 : shooting);
+        el.energyBar.hidden = coop;
+        el.energyFill.style.width = `${(w.energy / CONFIG.energy.max) * 100}%`;
+        el.energyBar.classList.toggle('overheat', w.overheat);
 
         el.label.textContent = label;
         el.score.textContent = `SCORE ${game.score}　TIME ${formatTime(game.time)}`;

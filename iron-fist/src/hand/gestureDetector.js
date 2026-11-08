@@ -6,7 +6,7 @@ import { CONFIG } from '../config.js';
 
 const GRIP_ON = 3;          // 4本指のうち何本曲がっていたら「握った」とするか
 const GRIP_OFF = 2;         // これを下回ったら「離した」
-const THUMB_UP = 0.65;      // 親指の先〜人差し指までの距離（手のひらの長さに対する割合）がこれ以上で「立てた」
+const THUMB_UP = 0.55;      // 親指の先〜人差し指までの距離（手のひらの長さに対する割合）がこれ以上で「立てた」（大きいほど離したあと押しっぱなしが残る）
 const THUMB_DOWN = 0.45;    // これ以下で「閉じた」
 const BALL_ON = 35;         // ボールを握ったとみなす、4本指の平均の曲がり（度）
 const BALL_OFF = 25;

@@ -38,6 +38,7 @@ export const COCKPIT = {
     buttonPress: 0.4,       // ボタンを押し込む深さ（クリップの何割まで）。1 だと赤ボタンが金色のベゼルより下に沈んで見えなくなる
     handleRange: deg(60),   // 前進・後退いっぱいのときのハンドルの回転角
     follow: 12,             // ローパスの強さ（大きいほど手に速く追いつく。小さいほどなめらか）
+    buttonFollow: 40,       // ボタンだけは押す・離すがすぐ見えるよう速く追いつかせる
     showGuns: false,        // 仮の銃身（撃つと下がる円柱）を出す
     // 乗り降りの演出：前の枠（Screen_Frame）は上の辺を軸に、奥へ跳ね上がって開く
     openAngle: deg(110),
@@ -270,9 +271,10 @@ export class Cockpit {
     // 入力に合わせてコントローラーを動かす（毎フレーム）
     updateStick(input, dt = 1 / 60) {
         const k = 1 - Math.exp(-COCKPIT.follow * dt);
+        const kButton = 1 - Math.exp(-COCKPIT.buttonFollow * dt);
         const t = this.target(input);
         const v = this.value;
-        for (const key of Object.keys(v)) v[key] += (t[key] - v[key]) * k;
+        for (const key of Object.keys(v)) v[key] += (t[key] - v[key]) * (key === 'button' ? kButton : k);
 
         // value 0〜1 → クリップの時刻（1/24 秒〜終わり）
         const seek = (c, value) => {

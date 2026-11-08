@@ -178,6 +178,14 @@ button.sub { background: transparent; color: var(--muted); border: 1px solid var
 .hp-bar .bar-fill { background: var(--ok); transition: width 0.15s; }
 .hp-bar .bar-fill.low { background: var(--fire); }
 
+/* 銃のエネルギー（HP バーのすぐ上） */
+.energy-bar { position: absolute; bottom: 56px; left: 50%; transform: translateX(-50%); width: 360px; height: 8px; background: #1b2731; border: 1px solid var(--line); }
+.energy-bar span { position: absolute; left: -30px; top: -5px; font-size: 13px; color: var(--muted); }
+.energy-bar em { position: absolute; left: 0; right: 0; top: -20px; text-align: center; font-size: 12px; font-style: normal; font-weight: bold; letter-spacing: 0.15em; color: var(--fire); visibility: hidden; }
+.energy-bar.overheat .bar-fill { background: var(--fire); }
+.energy-bar.overheat em { visibility: visible; animation: overheat-blink 0.4s steps(2) infinite; }
+@keyframes overheat-blink { 50% { opacity: 0; } }
+
 .damage-flash { position: absolute; inset: 0; background: radial-gradient(transparent 40%, rgba(255, 40, 40, 0.7)); opacity: 0; }
 
 /* モード（搭乗 / 共闘） */
