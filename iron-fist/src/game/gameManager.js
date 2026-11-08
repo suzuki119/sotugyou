@@ -16,6 +16,7 @@ import { Sword } from './sword.js';
 import { Companion } from './companion.js';
 import { Boarding } from './boarding.js';
 import { CONFIG } from '../config.js';
+import { sound } from '../audio/sound.js';
 
 const ZAKO_TO_BOSS = 12;    // この数を倒すとボス戦
 const ZAKO_MAX_TIME = 120;  // 倒しきれなくてもこの秒数でボス戦
@@ -88,11 +89,15 @@ export class GameManager {
         if (boarding) {
             // 乗り降りの演出中：操作はきかない。カメラとロボットは演出が動かす
             this.boarding.update(dt);
+            sound.loop('steam');
             this.weapon.update(dt, false, this.crosshair, this.enemies, onHit, null);
             this.sword.update(dt, {}, false, this.enemies, onHit);
         } else {
             this.updateCrosshair(dt, riding ? input : { ...input, aimX: 0, aimY: 0 });
             this.player.update(dt, input, riding ? this.rawAim : { x: 0, y: 0 });
+            // 足音：移動の入力の大きさで音量を変える。生身は軽く速く
+            const step = Math.min(1, Math.hypot(input.moveY, riding && CONFIG.turnWith !== 'leftStick' ? input.moveX : 0));
+            if (step > 0.1) sound.loop('footstep', step, riding ? 1 : 1.4);
             this.weapon.update(dt, riding && input.fire, this.crosshair, this.enemies, onHit, this.lock);
             this.sword.update(dt, input, !riding, this.enemies, onHit);
             if (riding) this.companion.follow(this.player);

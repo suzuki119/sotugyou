@@ -2,6 +2,7 @@
 
 import * as THREE from 'three';
 import { segmentHitsSphere } from '../weapon.js';
+import { sound } from '../../audio/sound.js';
 
 const geo = new THREE.SphereGeometry(0.6, 10, 8);
 const mat = new THREE.MeshBasicMaterial({ color: 0xff5a3c });
@@ -13,6 +14,7 @@ export class EnemyBullets {
     }
 
     fire(from, to, speed = 30, damage = 6) {
+        sound.play('enemyShot', { minInterval: 0.08 });   // ボスの弾幕で音が重なりすぎないようにする
         const mesh = new THREE.Mesh(geo, mat);
         mesh.position.copy(from);
         this.scene.add(mesh);

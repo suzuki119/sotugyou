@@ -3,6 +3,7 @@
 
 import { CONFIG } from '../config.js';
 import { formatTime } from './Hud.js';
+import { sound } from '../audio/sound.js';
 
 export class Screens {
     constructor(root) {
@@ -47,8 +48,22 @@ export class Screens {
                 <h1>IRON FIST</h1>
                 <p class="subtitle">両手で操縦する、巨大ロボット・シューティング</p>
                 <button data-action="start">スタート</button>
+                <div class="volume">
+                    ${volumeSlider('bgm', 'BGM', CONFIG.sound.bgmVolume)}
+                    ${volumeSlider('se', '効果音', CONFIG.sound.seVolume)}
+                </div>
                 ${CONFIG.debug ? '<p class="note">開発用：K キーでキーボード操作に切り替え</p>' : ''}
             </div>`, { start: onStart }, { Enter: 'start' });
+        for (const input of this.root.querySelectorAll('.volume input')) {
+            const out = input.parentElement.querySelector('output');
+            input.addEventListener('input', () => {
+                const v = input.value / 100;
+                out.textContent = input.value;
+                sound.setVolume(input.dataset.kind, v);
+            });
+            // 効果音は、つまみを離したときに試しに鳴らして大きさを確かめられるようにする
+            if (input.dataset.kind === 'se') input.addEventListener('change', () => sound.play('gun'));
+        }
     }
 
     cameraPermission(onAllow, error) {
@@ -151,4 +166,12 @@ export class Screens {
         const bar = this.$('.retry .bar-fill');
         if (bar) bar.style.width = `${progress * 100}%`;
     }
+}
+
+// スタート画面の音量スライダー（0〜100）
+function volumeSlider(kind, label, value) {
+    const v = Math.round(value * 100);
+    return `<label class="volume-row"><span>${label}</span>
+        <input type="range" min="0" max="100" step="1" value="${v}" data-kind="${kind}">
+        <output>${v}</output></label>`;
 }

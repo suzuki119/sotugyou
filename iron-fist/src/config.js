@@ -52,6 +52,12 @@ export const CONFIG = {
 
     smoothing: 0.45,          // 位置の平滑化（0＝なし、1に近いほどなめらかで遅い）
     minHandScore: 0.6,        // これより信頼度が低い手は使わない
+    // 音量（0〜1）。se は効果音ごとの倍率
+    sound: {
+        bgmVolume: 0.35,
+        seVolume: 0.8,
+        se: { gun: 0.35, outOfEnergy: 0.9, enemyShot: 0.35, footstep: 0.7, steam: 0.6 },
+    },
     // 銃のエネルギー：1発ごとに消費し、撃たずにいると自動で回復する
     //   0 になるとオーバーヒート：resumeAt まで回復するまで撃てない
     energy: {

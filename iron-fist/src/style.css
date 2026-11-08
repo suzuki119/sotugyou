@@ -72,6 +72,11 @@ button.sub { background: transparent; color: var(--muted); border: 1px solid var
 .title { text-align: center; }
 .title h1 { font-size: 96px; letter-spacing: 0.12em; margin: 0; color: var(--accent); }
 .subtitle { color: var(--muted); font-size: 20px; }
+.volume { display: inline-flex; flex-direction: column; gap: 6px; margin-top: 24px; padding: 12px 20px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; pointer-events: auto; }
+.volume-row { display: grid; grid-template-columns: 4em 200px 2.5em; align-items: center; gap: 12px; font-size: 14px; color: var(--muted); }
+.volume-row span { text-align: left; }
+.volume-row input { accent-color: var(--accent); cursor: pointer; }
+.volume-row output { text-align: right; font-variant-numeric: tabular-nums; color: var(--text); }
 
 .calib { text-align: center; }
 .preview { width: 480px; height: 270px; background: #070b0f; border-radius: 6px; }

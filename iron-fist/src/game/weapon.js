@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { MUZZLES } from '../render/cockpit.js';
 import { CONFIG } from '../config.js';
+import { sound } from '../audio/sound.js';
 
 const FIRE_RATE = 10;       // 発/秒
 const SPEED = 220;          // m/s
@@ -42,7 +43,7 @@ export class Weapon {
             this.cooldown = 1 / FIRE_RATE;
             this.energy = Math.max(0, this.energy - E.costPerShot);
             this.sinceShot = 0;
-            if (this.energy <= 0) this.overheat = true;
+            if (this.energy <= 0) { this.overheat = true; sound.play('outOfEnergy'); }
             this.spawn(aim, enemies, lock);
         }
         // 撃っていなければ回復（オーバーヒート中は親指を閉じたままでも回復する）
@@ -89,6 +90,7 @@ export class Weapon {
         this.bullets.push({ mesh, dir, life: LIFE });
 
         this.cockpit.kick(this.side);
+        sound.play('gun', { rate: 0.95 + Math.random() * 0.1 });   // 少し音程をばらして、連射が単調に聞こえないようにする
         this.side = 1 - this.side;
     }
 

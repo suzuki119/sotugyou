@@ -16,6 +16,7 @@ import { Hud } from './ui/Hud.js';
 import { Screens } from './ui/screens.js';
 import { drawHands, handStyles } from './ui/handPreview.js';
 import { handFrame, averageFrame, fingerPitch } from './hand/ballStick.js';
+import { sound } from './audio/sound.js';
 
 const video = document.getElementById('video');
 const keyboard = CONFIG.debug ? new DebugKeyboardInput() : null;
@@ -73,8 +74,17 @@ function setState(next) {
 
 const usingKeyboard = () => keyboard?.enabled;
 
+// 状態ごとの BGM（null は無音）。ここにない状態（HAND_LOST）は今の曲を小さくして続ける
+const BGM = {
+    [STATE.START]: 'tutorial', [STATE.CAMERA_PERMISSION]: 'tutorial', [STATE.CALIBRATION]: 'tutorial', [STATE.TUTORIAL]: 'tutorial',
+    [STATE.READY]: 'battle', [STATE.PLAYING]: 'battle', [STATE.BOSS]: 'boss',
+    [STATE.CLEAR]: null, [STATE.GAME_OVER]: null, [STATE.RESULT]: null,
+};
+
 state.onChange((next) => {
     timer = 0;
+    if (next in BGM) sound.playBgm(BGM[next]);
+    sound.duckBgm(next === STATE.HAND_LOST ? 0.35 : 1);
     hud.show([STATE.TUTORIAL, STATE.READY, STATE.PLAYING, STATE.BOSS, STATE.HAND_LOST].includes(next));
     updateShowcase(next);
 
@@ -242,6 +252,7 @@ function frame(now) {
     }
     if (!state.is(STATE.HAND_LOST)) robot.update(dt);
     sceneManager.render();
+    sound.update();   // このフレームで鳴らさなかったループ音（足音・蒸気）を止める
     if (CONFIG.debug) updateDebug(now);
     requestAnimationFrame(frame);
 }
