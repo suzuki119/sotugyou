@@ -4,6 +4,7 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 
 // size：大きさ（m）。height＝高さをそろえる / width＝横幅をそろえる
 // center：当たり判定の中心の高さ（モデルの高さに対する割合）
@@ -55,7 +56,7 @@ export class EnemyRig {
         this.height = t.height;
         this.lift = t.lift;
 
-        const model = t.model.clone(true);
+        const model = cloneSkinned(t.model);   // 骨も複製する（通常の clone だと骨が共有され、全員が同じ動きになる）
         model.position.copy(t.inner);
         this.object = new THREE.Group();
         this.object.scale.setScalar(t.scale);
@@ -72,6 +73,9 @@ export class EnemyRig {
             }
         });
 
+        this.model = model;
+        this.scale = t.scale;
+        this.outlines = null;
         this.mixer = new THREE.AnimationMixer(model);
         this.current = null;
         this.flashing = false;
@@ -92,6 +96,41 @@ export class EnemyRig {
         if (this.current && this.current !== next) next.crossFadeFrom(this.current, fade, false);
         next.play();
         this.current = next;
+    }
+
+    // 輪郭：裏面だけを、法線方向に少しふくらませて塗った複製を重ねる（的など、目立たせたい敵用）
+    //   width は世界での太さ（m）
+    setOutline(on, { color = 0xffd600, width = 0.3 } = {}) {
+        if (on && !this.outlines) {
+            const local = width / this.scale;   // モデルの座標での太さ
+            const material = new THREE.MeshBasicMaterial({ color, side: THREE.BackSide });
+            material.onBeforeCompile = (shader) => {
+                shader.vertexShader = shader.vertexShader.replace(
+                    '#include <skinning_vertex>',
+                    `#include <skinning_vertex>\n transformed += normalize(normal) * ${local.toFixed(5)};`,
+                );
+            };
+            this.outlineMaterial = material;
+            this.outlines = [];
+            const meshes = [];
+            this.model.traverse((o) => { if (o.isMesh) meshes.push(o); });
+            for (const m of meshes) {
+                let hull;
+                if (m.isSkinnedMesh) {
+                    hull = new THREE.SkinnedMesh(m.geometry, material);
+                    hull.bind(m.skeleton, m.bindMatrix);
+                } else {
+                    hull = new THREE.Mesh(m.geometry, material);
+                }
+                hull.position.copy(m.position);
+                hull.quaternion.copy(m.quaternion);
+                hull.scale.copy(m.scale);
+                hull.frustumCulled = false;
+                m.parent.add(hull);
+                this.outlines.push(hull);
+            }
+        }
+        for (const h of this.outlines ?? []) h.visible = on;
     }
 
     flash(on) {
@@ -115,5 +154,6 @@ export class EnemyRig {
     dispose() {
         this.mixer.stopAllAction();
         for (const e of this.materials) e.m.dispose();
+        this.outlineMaterial?.dispose();
     }
 }

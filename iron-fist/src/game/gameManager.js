@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import { Player, MAX_HP } from './player.js';
 import { Weapon } from './weapon.js';
-import { Stage } from './stage.js';
+import { Stage, ARENA_RADIUS } from './stage.js';
 import { Drone } from './enemies/drone.js';
 import { Walker } from './enemies/walker.js';
 import { Boss } from './enemies/boss.js';
@@ -21,6 +21,7 @@ import { sound } from '../audio/sound.js';
 const ZAKO_TO_BOSS = 12;    // この数を倒すとボス戦
 const ZAKO_MAX_TIME = 120;  // 倒しきれなくてもこの秒数でボス戦
 const MAX_ALIVE = 5;
+const ZONE_RADIUS = 7;      // チュートリアルの目的地ゾーンの半径
 const ROBOT_HIT = { radius: 4.5, scale: 0.5 };          // 共闘モードでロボットが受ける弾（大きくて当たりやすいが、ダメージは半分）
 const PLAYER_AGGRO = 0.5;   // 共闘モード：プレイヤーまでの距離がロボットまでの距離のこの割合より近い敵だけ、プレイヤーを狙う
 
@@ -56,6 +57,7 @@ export class GameManager {
         this.enemies = [];
         this.dying = [];
         this.effects = [];
+        this.hideZone();
         this.weapon.clear();
         this.bullets.clear();
         this.boarding.cancel();
@@ -109,8 +111,13 @@ export class GameManager {
         this.updateEffects(dt);
         this.updateDying(dt);
         this.stage.update(dt);
+        this.updateZone(dt);
         this.damageFlash = Math.max(0, this.damageFlash - dt);
-        if (mode !== 'play') return;
+        if (mode !== 'play') {
+            // チュートリアル：敵は動かず撃ってこない。アニメーションと被弾の点滅だけ進める
+            for (const e of this.enemies) { e.flash -= dt; e.applyFlash(); e.rig?.update(dt); }
+            return;
+        }
 
         if (!this.boss) this.updateWave(dt);
 
@@ -131,6 +138,61 @@ export class GameManager {
 
         if (this.player.hp <= 0) this.onEvent('gameover');
         else if (this.boss?.dead && !this.dying.includes(this.boss)) this.onEvent('clear');   // ボスが倒れきったらクリア
+    }
+
+    // ---- チュートリアル用 ----
+    // 的：正面の遠くに浮かぶドローン（動かない・撃たない）
+    spawnTutorialTarget() {
+        const t = this.spawn(new Drone());
+        const p = this.player.object.position, y = this.player.yaw;
+        t.position.set(p.x - Math.sin(y) * 55, 10, p.z - Math.cos(y) * 55);
+        t.object.lookAt(p.x, 10, p.z);
+        this.stage.closeGate(true);
+        t.setOutline(true);   // 輪郭を出して、どこにいるか分かりやすくする
+        return t;
+    }
+
+    // 目的地：正面やや先の、黄色く光るゾーン
+    showZone() {
+        this.hideZone();
+        const p = this.player.object.position, y = this.player.yaw;
+        const at = new THREE.Vector3(p.x - Math.sin(y) * 34, 0, p.z - Math.cos(y) * 34);
+        if (at.length() > ARENA_RADIUS * 0.8) at.setLength(ARENA_RADIUS * 0.8);
+        const mat = () => new THREE.MeshBasicMaterial({ color: 0xffd600, transparent: true, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending });
+        const group = new THREE.Group();
+        const disc = new THREE.Mesh(new THREE.CircleGeometry(ZONE_RADIUS, 40), mat());
+        disc.rotation.x = -Math.PI / 2;
+        disc.position.y = 0.15;
+        const ring = new THREE.Mesh(new THREE.RingGeometry(ZONE_RADIUS - 0.5, ZONE_RADIUS, 40), mat());
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.y = 0.2;
+        const beam = new THREE.Mesh(new THREE.CylinderGeometry(ZONE_RADIUS, ZONE_RADIUS, 40, 40, 1, true), mat());
+        beam.position.y = 20;
+        group.add(disc, ring, beam);
+        group.position.copy(at);
+        this.scene.add(group);
+        this.zone = { group, disc, beam, at, t: 0 };
+    }
+
+    hideZone() {
+        if (!this.zone) return;
+        this.scene.remove(this.zone.group);
+        this.zone.group.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); });
+        this.zone = null;
+    }
+
+    get inZone() {
+        const z = this.zone;
+        return !!z && flatDist(this.player.object.position, z.at) < ZONE_RADIUS;
+    }
+
+    updateZone(dt) {
+        const z = this.zone;
+        if (!z) return;
+        z.t += dt;
+        const k = 0.5 + 0.5 * Math.sin(z.t * 4);
+        z.disc.material.opacity = 0.2 + 0.2 * k;
+        z.beam.material.opacity = 0.08 + 0.1 * k;
     }
 
     // 手をパーにして holdMs 待つと切り替える

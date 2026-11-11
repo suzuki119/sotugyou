@@ -73,7 +73,20 @@ export class EnemyBase {
         this.rig.play(name, { fade: 0.25 });
     }
 
+    // 輪郭を出す・消す（チュートリアルの的）。モデルがなければ仮の形に裏面の殻をかぶせる
+    setOutline(on) {
+        if (this.rig) return this.rig.setOutline(on);
+        if (!this.body) return;
+        if (!this.shell) {
+            this.shell = new THREE.Mesh(this.body.geometry, new THREE.MeshBasicMaterial({ color: 0xffd600, side: THREE.BackSide }));
+            this.shell.scale.setScalar(1.15);
+            this.body.add(this.shell);
+        }
+        this.shell.visible = on;
+    }
+
     die() {
+        this.setOutline(false);
         this.dead = true;
         this.dying = 0;
         this.fall = 0;

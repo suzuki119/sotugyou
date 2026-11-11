@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { MUZZLES } from '../render/cockpit.js';
 import { CONFIG } from '../config.js';
 import { sound } from '../audio/sound.js';
+import { createBullet } from '../render/bulletModel.js';
 
 const FIRE_RATE = 10;       // 発/秒
 const SPEED = 220;          // m/s
@@ -83,7 +84,7 @@ export class Weapon {
 
         const start = this.camera.localToWorld(MUZZLES[this.side].clone());
         const dir = target.sub(start).normalize();
-        const mesh = new THREE.Mesh(geo, mat);
+        const mesh = createBullet('player', () => new THREE.Mesh(geo, mat));
         mesh.position.copy(start);
         mesh.lookAt(start.clone().add(dir));
         this.scene.add(mesh);
@@ -108,8 +109,11 @@ export class Weapon {
     }
 }
 
+const segment = new THREE.Line3();
+const nearest = new THREE.Vector3();
+
+// 線分 a→b が球に触れるか（速い弾のすり抜け防止）
 export function segmentHitsSphere(a, b, center, radius) {
-    const ab = new THREE.Vector3().subVectors(b, a);
-    const t = THREE.MathUtils.clamp(new THREE.Vector3().subVectors(center, a).dot(ab) / (ab.lengthSq() || 1), 0, 1);
-    return a.clone().addScaledVector(ab, t).distanceToSquared(center) < radius * radius;
+    segment.set(a, b).closestPointToPoint(center, true, nearest);
+    return nearest.distanceToSquared(center) < radius * radius;
 }

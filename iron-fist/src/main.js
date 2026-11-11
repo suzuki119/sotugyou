@@ -11,6 +11,7 @@ import { GameManager } from './game/gameManager.js';
 import { SceneManager } from './render/sceneManager.js';
 import { RobotModel } from './render/robotModel.js';
 import { loadEnemyModels } from './render/enemyModels.js';
+import { loadBulletModel } from './render/bulletModel.js';
 import { CockpitDebug } from './render/cockpitDebug.js';
 import { Hud } from './ui/Hud.js';
 import { Screens } from './ui/screens.js';
@@ -38,7 +39,18 @@ let timer = 0;                       // 各状態で使う経過時間
 let samples = [];                    // キャリブレーションの記録
 let retryArmed = false;              // リザルトで一度手を離してから、握り続けるとリトライ
 let tutorialStep = 0, tutorialProgress = 0;
+let resumeGame = false;                  // 一時停止中の取り直し：戦闘の進行を残したまま基準だけ取り直す
+let afterCalibration = STATE.TUTORIAL;   // キャリブレーションが終わったら進む先（取り直しは元の状態に戻る）
+const IDLE = { aimX: 0, aimY: 0, fire: false, moveX: 0, moveY: 0, leftOpen: false, rightOpen: false, swing: 0, swingX: 0, swingY: 0, handX: 0, handY: 0 };   // 基準を取る前は、操作を受け付けない
 let result = null;
+
+// 手の基準位置の取り直し（チュートリアル中・開始前のカウントダウン中・戦闘の一時停止中）。終わったら元の状態に戻る
+hud.el.recalibrate.addEventListener('click', () => {
+    if (!state.is(STATE.TUTORIAL, STATE.READY, STATE.HAND_LOST)) return;
+    resumeGame = state.is(STATE.HAND_LOST);
+    afterCalibration = resumeGame ? resumeTo : state.current;
+    setState(STATE.CALIBRATION);
+});
 
 const game = new GameManager(sceneManager, robot, (event, data) => {
     if (event === 'mode') hud.modeChanged(data);
@@ -52,17 +64,19 @@ if (CONFIG.debug) new CockpitDebug(game.cockpit);   // C キーでコックピ�
 // チュートリアルの各ステップ：done(input, game) が true の間だけ進む
 const TUTORIAL = [
     { title: '右手で照準', text: {
-        horizontalAuto: '右手を握ったまま左右に動かして、照準を動かそう。上下は自動で敵に合う。照準を画面の端に寄せると機体が旋回する',
-        orientationSwitch: '右手を縦にして左右に動かすと照準が左右に、横に寝かせて左右に動かすと上下に動く',
-        free: '右手のボールスティックを前後・左右に倒して、照準を動かそう',
+        horizontalAuto: 'まずは右手で照準を動かしてみましょう！右手を握ったまま左右に動かしてくださいね。上下は自動で敵に合います。照準を画面の端に寄せると、機体が旋回しますよ',
+        orientationSwitch: '右手を縦にして左右に動かすと照準が左右に、横に寝かせて動かすと上下に動きます。やってみましょう！',
+        free: '右手のボールスティックを前後・左右に倒して、照準を動かしてみましょう！',
     }[CONFIG.aimAxis], done: (i) => Math.hypot(i.aimX, i.aimY) > 0.4 },
-    { title: '親指で射撃', text: 'ボールを握ったまま親指を閉じている間、連射できる。親指を離すと止まる', done: (i) => i.fire },
-    { title: '左手で移動', text: '左手を握ったまま、手首を曲げて指を下に向けると前進、上に向けると後退。左右に動かすと横移動', done: (i) => Math.hypot(i.moveX, i.moveY) > 0.4 },
-    { title: 'ロボットから降りる', text: '両手をパーにして少し待つと、ロボットから降りて共闘モードになる。ロボットは自分で歩いて戦ってくれる',
+    { title: '親指で射撃', text: 'ボールを握ったまま親指を閉じている間、連射できます。親指を離すと止まりますよ。照準を合わせて、正面に浮かぶドローンを撃ち落としてみましょう！',
+        enter: (g) => g.spawnTutorialTarget(), done: (i, g) => g.kills > 0 },
+    { title: '左手で移動', text: '次は左手で移動です！左手を握ったまま、手首を曲げて指を下に向けると前進、上に向けると後退します。左右に動かすと横移動ですよ。黄色く光るゾーンまで行ってみましょう！',
+        enter: (g) => g.showZone(), leave: (g) => g.hideZone(), done: (i, g) => g.inZone },
+    { title: 'ロボットから降りる', text: '両手をパーにして少し待つと、ロボットから降りて共闘モードになります。ロボットが自分で歩いて戦ってくれるので、頼もしいですよ！',
         done: (i, g) => g.mode === 'coop' },
-    { title: '剣で斬る', text: '右手をすばやく振ると剣で斬る。斬撃は前方の敵へ飛んでいく。左手は左右で旋回、前後で移動',
+    { title: '剣で斬る', text: '右手をすばやく振ると、剣で斬れます！斬撃は前方の敵へ飛んでいきますよ。左手は、左右で旋回、前後で移動です。さあ、振ってみましょう！',
         done: (i, g) => g.mode === 'coop' && g.sword.slashes > 0 },
-    { title: 'ロボットに乗る', text: 'もう一度両手をパーにすると、ロボットに乗り込んで搭乗モードに戻る', done: (i, g) => g.mode === 'ride' },
+    { title: 'ロボットに乗る', text: '最後です！もう一度両手をパーにすると、ロボットに乗り込んで搭乗モードに戻れます。いよいよ出撃ですね！', done: (i, g) => g.mode === 'ride' },
 ];
 
 // -----------------------------------------------------------------
@@ -90,6 +104,8 @@ state.onChange((next) => {
 
     switch (next) {
         case STATE.START:
+            afterCalibration = STATE.TUTORIAL;
+            resumeGame = false;
             screens.start(() => {
                 if (usingKeyboard()) setState(STATE.READY);
                 else if (!cameraStarted) setState(STATE.CAMERA_PERMISSION);
@@ -97,11 +113,13 @@ state.onChange((next) => {
             });
             break;
         case STATE.CAMERA_PERMISSION:
+            game.reset();   // 戦闘画面（コックピット）の中で案内する
             screens.cameraPermission(requestCamera);
             break;
         case STATE.CALIBRATION:
+            if (!resumeGame) game.reset();
             samples = [];
-            screens.calibration(() => setState(STATE.TUTORIAL));
+            screens.calibration(() => setState(afterCalibration));
             break;
         case STATE.TUTORIAL:
             game.reset();
@@ -134,6 +152,7 @@ state.onChange((next) => {
             retryArmed = false;
             screens.result(result, {
                 retry: () => setState(STATE.READY),            // 同じ人が続けて遊ぶのでキャリブレーションは省略
+                tutorial: () => setState(STATE.TUTORIAL),   // ゲームオーバー時のみ表示。キャリブレーションは省略
                 title: () => setState(STATE.START),
             });
             break;
@@ -147,16 +166,9 @@ function updateShowcase(next) {
     let shown = true;
     switch (next) {
         case STATE.START:
-        case STATE.CAMERA_PERMISSION:
-            if (showcase && robot.shotName === 'title') break;   // タイトルからそのまま続ける
             shown = robot.show('title');
             robot.resetHatch();
             robot.play('Stand');
-            break;
-        case STATE.CALIBRATION:
-            // 片膝をついてハッチを開け、乗り込むのを待つ
-            shown = robot.show('mount');
-            robot.play('Mount', { once: true, then: () => robot.hatch(true) });
             break;
         case STATE.CLEAR:
             shown = robot.show('victory', c.position, c.yaw);
@@ -186,6 +198,7 @@ function updateShowcase(next) {
 }
 
 function showTutorialStep() {
+    TUTORIAL[tutorialStep].enter?.(game);
     screens.tutorial(tutorialStep, TUTORIAL, () => setState(STATE.READY));
 }
 
@@ -217,7 +230,11 @@ function frame(now) {
     const i = input.get();
 
     switch (state.current) {
-        case STATE.CALIBRATION: updateCalibration(i); break;
+        case STATE.CAMERA_PERMISSION: game.update(dt, IDLE, 'practice'); break;
+        case STATE.CALIBRATION:
+            if (!resumeGame) game.update(dt, IDLE, 'practice');
+            updateCalibration(i);
+            break;
         case STATE.TUTORIAL: updateTutorial(i, dt); break;
         case STATE.READY:
             game.update(dt, i, 'practice');
@@ -248,6 +265,7 @@ function frame(now) {
 
     if (!hud.root.hidden) {
         hud.update(i, game, hudLabel());
+        hud.el.recalibrate.hidden = !state.is(STATE.TUTORIAL, STATE.READY, STATE.HAND_LOST);
         updateBones(i);
     }
     if (!state.is(STATE.HAND_LOST)) robot.update(dt);
@@ -258,7 +276,7 @@ function frame(now) {
 }
 
 function updateCalibration(i) {
-    if (usingKeyboard()) return setState(STATE.TUTORIAL);
+    if (usingKeyboard()) return setState(afterCalibration);
     const { left, right } = input.hands;
     if (i.leftGrip && i.rightGrip) {
         samples.push({ left: { ...left }, right: { ...right } });
@@ -280,7 +298,8 @@ function updateCalibration(i) {
         base.left.pitch = samples.reduce((s, x) => s + fingerPitch(x.left.world), 0) / samples.length;   // 左手の基準の指の向き
         input.setBase(base);
         calibrated = true;
-        setState(STATE.TUTORIAL);
+        resumeGame = false;
+        setState(afterCalibration);
     }
 }
 
@@ -289,6 +308,7 @@ function updateTutorial(i, dt) {
     if (TUTORIAL[tutorialStep].done(i, game)) tutorialProgress += dt / 1.2;
     screens.updateTutorial(Math.min(1, tutorialProgress));
     if (tutorialProgress >= 1) {
+        TUTORIAL[tutorialStep].leave?.(game);
         tutorialStep += 1;
         tutorialProgress = 0;
         if (tutorialStep >= TUTORIAL.length) setState(STATE.READY);
@@ -368,7 +388,7 @@ requestAnimationFrame(frame);
 try {
     // ロボットのモデルは読み込めなくてもゲームは遊べる（演出が出ないだけ）
     const robotLoad = robot.load(sceneManager.renderer).catch((err) => console.error('ロボットのモデルを読み込めませんでした', err));
-    await Promise.all([tracker.init(), robotLoad, loadEnemyModels(), game.stage.load(), game.cockpit.load(sceneManager.envMap)]);   // 敵のモデルも、読み込めなければ仮の形で遊べる
+    await Promise.all([tracker.init(), robotLoad, loadEnemyModels(), loadBulletModel(), game.stage.load(), game.cockpit.load(sceneManager.envMap)]);   // 敵のモデルも、読み込めなければ仮の形で遊べる
     setState(STATE.START);
 } catch (err) {
     console.error(err);

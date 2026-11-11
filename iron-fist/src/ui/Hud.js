@@ -9,6 +9,7 @@ export class Hud {
             <div class="crosshair"></div>
             <div class="bones">
                 <canvas width="384" height="216"></canvas>
+                <button class="recalibrate">手の基準位置を取り直す</button>
                 <div class="bones-info"></div>
             </div>
             <div class="hud-top">
@@ -57,6 +58,7 @@ export class Hud {
             bones: $('.bones'),
             bonesCanvas: $('.bones canvas'),
             bonesInfo: $('.bones-info'),
+            recalibrate: $('.bones .recalibrate'),
             modeName: $('.mode-name'),
             modeFill: $('.mode-badge .bar-fill'),
             modeFlash: $('.mode-flash'),

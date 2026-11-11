@@ -15,6 +15,23 @@ export class Screens {
         });
     }
 
+    // オペレーター（human）のモニター。カメラ許可・キャリブレーション・チュートリアルはここで案内する
+    monitor({ label, face = 'normal', title, text, body = '', skip = false }) {
+        return `
+            <div class="monitor tutorial">
+                <div class="monitor-bar"><i></i>OPERATOR LINK<span>${label}</span></div>
+                <div class="monitor-body">
+                    <div class="monitor-face"><img src="/human/human_${face}.png" alt=""></div>
+                    <div class="monitor-talk">
+                        <h2>${title}</h2>
+                        <p>${text}</p>
+                    </div>
+                </div>
+                ${body}
+                ${skip ? '<button class="monitor-skip" data-action="skip">スキップ <kbd>Enter</kbd></button>' : ''}
+            </div>`;
+    }
+
     // html を表示し、[data-action] のボタンと keys のキーに処理を結びつける
     show(html, handlers = {}, keys = {}) {
         this.root.innerHTML = html;
@@ -67,33 +84,31 @@ export class Screens {
     }
 
     cameraPermission(onAllow, error) {
-        this.show(`
-            <div class="panel">
-                <h2>カメラを使います</h2>
-                <p>このゲームは、カメラで<strong>あなたの両手の動き</strong>を読み取って操縦します。</p>
-                <ul>
-                    <li>映像はこのパソコンの中だけで処理します</li>
-                    <li>映像を保存したり、インターネットに送ったりしません</li>
-                    <li>ゲーム中、カメラの映像は表示されません</li>
-                </ul>
-                ${error ? `<p class="error">${error}</p>` : ''}
-                <button data-action="allow">${error ? 'もう一度試す' : 'カメラを開始'}</button>
-            </div>`, { allow: onAllow }, { Enter: 'allow' });
+        this.show(this.monitor({
+            label: 'CAMERA',
+            face: error ? 'angly' : 'normal',
+            title: error ? 'カメラが使えません…' : 'カメラを使いますね！',
+            text: error
+                ? error
+                : 'IRON-FISTにようこそ！私がオペレーターとして、今回貴方をサポートします！この機体はカメラで<strong>あなたの両手の動き</strong>を読み取って操縦します。映像はこのパソコンの中だけで処理し、保存も送信もせず。ゲーム中、映像は表示されないのでご安心ください。',
+            body: `<button class="monitor-main" data-action="allow">${error ? 'もう一度試す' : 'カメラを開始'}</button>`,
+        }), { allow: onAllow }, { Enter: 'allow' });
     }
 
     calibration(onSkip) {
-        this.show(`
-            <div class="panel calib">
-                <h2>両手で操縦桿を握ってください</h2>
-                <p>右手は<strong>ボールスティック</strong>を上から包むように、左手はグリップを握るように構えて、そのまま動かさずに待ってください</p>
+        this.show(this.monitor({
+            label: 'CALIBRATION',
+            title: '両手で操縦桿を握ってください！',
+            text: 'それでは、まず右手は<strong>バイクのハンドル</strong>を上握るように、左手は横から<strong>グリップ</strong>を握るように構えて、動かさずに待ちましょう。左は👍️、右は👊です！',
+            body: `
                 <canvas class="preview" width="480" height="270"></canvas>
                 <div class="hands-check">
                     <span class="check left">左手</span>
                     <span class="check right">右手</span>
                 </div>
                 <div class="progress"><div class="bar-fill"></div></div>
-                <p class="metrics note"></p>
-            </div>`, { skip: onSkip }, CONFIG.debug ? { s: 'skip' } : {});
+                <p class="metrics note"></p>`,
+        }), { skip: onSkip }, CONFIG.debug ? { s: 'skip' } : {});
     }
 
     updateCalibration(input, progress, metrics) {
@@ -111,20 +126,23 @@ export class Screens {
         }
     }
 
+    // チュートリアル：搭乗モードの表示と同じ右上の、オペレーター画面で説明する
     tutorial(step, steps, onSkip) {
         const s = steps[step];
-        this.show(`
-            <div class="tutorial">
-                <div class="tutorial-step">STEP ${step + 1} / ${steps.length}</div>
-                <h2>${s.title}</h2>
-                <p>${s.text}</p>
-                <div class="progress"><div class="bar-fill"></div></div>
-            </div>`, { skip: onSkip }, { Enter: 'skip' });
+        this.show(this.monitor({
+            label: `STEP ${step + 1} / ${steps.length}`,
+            title: s.title,
+            text: s.text,
+            body: '<div class="progress"><div class="bar-fill"></div></div>',
+            skip: true,
+        }), { skip: onSkip }, { Enter: 'skip' });
     }
 
     updateTutorial(progress) {
         const bar = this.$('.progress .bar-fill');
         if (bar) bar.style.width = `${progress * 100}%`;
+        const img = this.$('.monitor-face img');
+        if (img) img.src = progress > 0 ? '/human/human_good.png' : '/human/human_normal.png';
     }
 
     countdown(n) {
@@ -157,9 +175,10 @@ export class Screens {
                 <div class="progress retry"><div class="bar-fill"></div></div>
                 <div class="buttons">
                     <button data-action="retry">リトライ</button>
+                    ${r.cleared ? '' : '<button data-action="tutorial" class="sub">チュートリアルをもう一度</button>'}
                     <button data-action="title" class="sub">タイトルへ</button>
                 </div>
-            </div>`, handlers, { Enter: 'retry', r: 'retry', t: 'title' });
+            </div>`, handlers, { Enter: 'retry', r: 'retry', t: 'title', ...(r.cleared ? {} : { c: 'tutorial' }) });
     }
 
     updateRetry(progress) {

@@ -17,6 +17,7 @@ export const COCKPIT = {
         eye: new THREE.Vector3(9.57, 11.15, 1.45),   // 一人称の目の位置（three の座標。Blender (9.57, -1.45, 11.15)）
         eyeOffset: new THREE.Vector3(0, 0, 0),       // 目の位置の微調整（カメラ座標：x 右 / y 上 / z 奥が -）
         fov: 70,                                     // 搭乗中のカメラの縦の視野角（度）。共闘モードでは元に戻す
+        frameOpacity: 0.5,                           // 前の枠（Screen_Frame）の不透明度。横や周りが見えるように半透明にする
         scaleX: 1.5,                                 // 枠と内装を横に広げる倍率（目の位置を中心に。1 でモデルのまま）
     },
     // 位置はカメラ座標（目からの距離 m）：x 右が + / y 上が + / z 奥が -。回転は度
@@ -163,6 +164,19 @@ export class Cockpit {
             pivot.updateMatrixWorld(true);
             pivot.attach(frame);
             this.framePivot = pivot;
+            // 枠だけ半透明にする（他の部品と材質を共有していても影響しないよう複製）
+            frame.traverse((o) => {
+                if (!o.isMesh) return;
+                o.material = [o.material].flat().map((m) => {
+                    const c = m.clone();
+                    c.userData.baseOpacity = COCKPIT.view.frameOpacity;
+                    c.transparent = true;
+                    c.opacity = COCKPIT.view.frameOpacity;
+                    c.depthWrite = false;
+                    return c;
+                });
+                if (o.material.length === 1) o.material = o.material[0];
+            });
         }
         const holder = new THREE.Group();     // 目の位置が原点・正面が -Z（カメラの向き）
         holder.rotation.y = Math.PI;
@@ -243,8 +257,10 @@ export class Cockpit {
     setFade(a) {
         const fading = a < 1;
         for (const m of this.materials) {
-            if (m.transparent !== fading) { m.transparent = fading; m.needsUpdate = true; }
-            m.opacity = a;
+            const base = m.userData.baseOpacity ?? 1;
+            const transparent = fading || base < 1;
+            if (m.transparent !== transparent) { m.transparent = transparent; m.needsUpdate = true; }
+            m.opacity = a * base;
         }
     }
 
