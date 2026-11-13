@@ -2,6 +2,7 @@
 
 import * as THREE from 'three';
 import { EnemyBase } from './enemyBase.js';
+import { CONFIG } from '../../config.js';
 
 const GRAVITY = 25;
 
@@ -19,17 +20,22 @@ export class Drone extends EnemyBase {
         this.cooldown = 2 + Math.random() * 2;
     }
 
-    behave(dt, { eye, bullets }) {
+    // drop：コンテナを投げられるなら { canDrop(), drop(位置) }
+    behave(dt, { eye, bullets, canDrop, drop }) {
         this.keepDistance(dt, eye, 40, 14, this.strafe);
         this.position.y = this.height + Math.sin(this.age * 2) * 1.5;
         if (this.body) this.body.rotation.y += dt * 2;
-        this.object.lookAt(eye.x, this.position.y, eye.z);   // モデルの正面（+Z）を相手に向ける（傾けない）
+        this.faceTarget(eye);
 
         this.cooldown -= dt;
         if (this.cooldown <= 0) {
             this.cooldown = 2.5 + Math.random() * 1.5;
             this.attack();
-            bullets.fire(this.position, eye, 28, 6);
+            if (canDrop?.() && Math.random() < CONFIG.container.chance) {
+                drop(this.position);   // 撃つ代わりに、プレイヤーのいる場所へコンテナを投げ落とす
+            } else {
+                bullets.fire(this.position, eye, 28, 6);
+            }
         }
     }
 

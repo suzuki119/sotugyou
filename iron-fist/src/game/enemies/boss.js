@@ -29,7 +29,7 @@ export class Boss extends EnemyBase {
         this.keepDistance(dt, eye, 60, this.angry ? 16 : 10, this.strafe);
         if (this.rig) {
             this.position.y = this.groundY;
-            this.object.lookAt(eye.x, this.position.y, eye.z);
+            this.faceTarget(eye);
         } else {
             this.position.y = 16 + Math.sin(this.age) * 3;
             this.core.rotation.y += dt;

@@ -3,7 +3,8 @@
 //   敵の object の原点＝当たり判定の中心。モデルはその中で、足元（ドローンは真ん中）が合うようにずらして置く
 
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { createGLTFLoader } from './gltfLoader.js';
+import { eachMesh, measure, footOffset, playClip } from './modelUtils.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 
 // size：大きさ（m）。height＝高さをそろえる / width＝横幅をそろえる
@@ -18,15 +19,13 @@ const templates = {};   // kind → { model, clips, scale, offset, height }
 
 // すべて読み込む。読み込めなかった種類は、敵の側で仮の形（箱など）を使う
 export async function loadEnemyModels() {
-    const loader = new GLTFLoader();
+    const loader = createGLTFLoader();
     await Promise.all(Object.entries(DEFS).map(async ([kind, def]) => {
         try {
             const gltf = await loader.loadAsync(def.url);
             const model = gltf.scene;
-            model.updateMatrixWorld(true);
-            const box = new THREE.Box3().setFromObject(model);
-            const size = box.getSize(new THREE.Vector3());
-            const center = box.getCenter(new THREE.Vector3());
+            const m = measure(model);
+            const { size } = m;
             const scale = def.height ? def.height / size.y : def.width / Math.max(size.x, size.z);
             const height = size.y * scale;
             templates[kind] = {
@@ -34,7 +33,7 @@ export async function loadEnemyModels() {
                 clips: Object.fromEntries(gltf.animations.map((c) => [c.name, c])),
                 scale,
                 // モデルの足元の中心を原点に → 当たり判定の中心の分だけ下げる
-                inner: new THREE.Vector3(-center.x, -box.min.y, -center.z),
+                inner: footOffset(m),
                 lift: height * def.center,
                 height,
             };
@@ -65,10 +64,10 @@ export class EnemyRig {
 
         // 点滅させるため、マテリアルは1体ずつ別にする（元の発光の色を覚えておく）
         this.materials = [];
-        model.traverse((o) => {
-            if (!o.isMesh) return;
-            o.material = Array.isArray(o.material) ? o.material.map((m) => m.clone()) : o.material.clone();
-            for (const m of [o.material].flat()) {
+        eachMesh(model, (o, mats) => {
+            const cloned = mats.map((m) => m.clone());
+            o.material = Array.isArray(o.material) ? cloned : cloned[0];
+            for (const m of cloned) {
                 if (m.emissive) this.materials.push({ m, color: m.emissive.clone(), intensity: m.emissiveIntensity });
             }
         });
@@ -89,13 +88,7 @@ export class EnemyRig {
     play(name, { once = false, fade = 0.2 } = {}) {
         const clip = this.clips[name];
         if (!clip) return;
-        const next = this.mixer.clipAction(clip);
-        next.reset();
-        next.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, Infinity);
-        next.clampWhenFinished = once;
-        if (this.current && this.current !== next) next.crossFadeFrom(this.current, fade, false);
-        next.play();
-        this.current = next;
+        this.current = playClip(this.mixer, clip, this.current, { once, fade });
     }
 
     // 輪郭：裏面だけを、法線方向に少しふくらませて塗った複製を重ねる（的など、目立たせたい敵用）
@@ -113,7 +106,7 @@ export class EnemyRig {
             this.outlineMaterial = material;
             this.outlines = [];
             const meshes = [];
-            this.model.traverse((o) => { if (o.isMesh) meshes.push(o); });
+            eachMesh(this.model, (o) => meshes.push(o));
             for (const m of meshes) {
                 let hull;
                 if (m.isSkinnedMesh) {

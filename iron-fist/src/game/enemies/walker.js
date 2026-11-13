@@ -28,7 +28,7 @@ export class Walker extends EnemyBase {
 
     behave(dt, { eye, bullets }) {
         this.keepDistance(dt, eye, 28, 8, 0.3);
-        this.object.lookAt(eye.x, this.position.y, eye.z);   // モデルの正面（+Z）を相手に向ける
+        this.faceTarget(eye);
         this.legs?.forEach((l, i) => (l.rotation.x = Math.sin(this.age * 5 + i * Math.PI) * 0.5));
 
         this.cooldown -= dt;

@@ -253,5 +253,6 @@ export class Boarding {
         p.object.rotation.y = yaw;
         p.camera.position.set(0, at.y, 0);
         p.camera.rotation.x = pitch;
+        p.camera.rotation.z = 0;   // 搭乗中の揺れの傾きを残さない
     }
 }

@@ -16,7 +16,10 @@ import { CockpitDebug } from './render/cockpitDebug.js';
 import { Hud } from './ui/Hud.js';
 import { Screens } from './ui/screens.js';
 import { drawHands, handStyles } from './ui/handPreview.js';
-import { handFrame, averageFrame, fingerPitch } from './hand/ballStick.js';
+import { TUTORIAL } from './game/tutorialSteps.js';
+import { computeBase } from './input/calibration.js';
+import { createShowcase } from './render/showcase.js';
+import { createBonesDisplay } from './ui/bonesDisplay.js';
 import { sound } from './audio/sound.js';
 
 const video = document.getElementById('video');
@@ -58,26 +61,9 @@ const game = new GameManager(sceneManager, robot, (event, data) => {
     if (event === 'clear') setState(STATE.CLEAR);
     if (event === 'gameover') setState(STATE.GAME_OVER);
 });
+if (CONFIG.debug) window.game = game;   // 開発時だけ、ブラウザのコンソールから game を直接触れるようにする
 if (CONFIG.debug) new CockpitDebug(game.cockpit);   // C キーでコックピットの値を直接動かす
 
-
-// チュートリアルの各ステップ：done(input, game) が true の間だけ進む
-const TUTORIAL = [
-    { title: '右手で照準', text: {
-        horizontalAuto: 'まずは右手で照準を動かしてみましょう！右手を握ったまま左右に動かしてくださいね。上下は自動で敵に合います。照準を画面の端に寄せると、機体が旋回しますよ',
-        orientationSwitch: '右手を縦にして左右に動かすと照準が左右に、横に寝かせて動かすと上下に動きます。やってみましょう！',
-        free: '右手のボールスティックを前後・左右に倒して、照準を動かしてみましょう！',
-    }[CONFIG.aimAxis], done: (i) => Math.hypot(i.aimX, i.aimY) > 0.4 },
-    { title: '親指で射撃', text: 'ボールを握ったまま親指を閉じている間、連射できます。親指を離すと止まりますよ。照準を合わせて、正面に浮かぶドローンを撃ち落としてみましょう！',
-        enter: (g) => g.spawnTutorialTarget(), done: (i, g) => g.kills > 0 },
-    { title: '左手で移動', text: '次は左手で移動です！左手を握ったまま、手首を曲げて指を下に向けると前進、上に向けると後退します。左右に動かすと横移動ですよ。黄色く光るゾーンまで行ってみましょう！',
-        enter: (g) => g.showZone(), leave: (g) => g.hideZone(), done: (i, g) => g.inZone },
-    { title: 'ロボットから降りる', text: '両手をパーにして少し待つと、ロボットから降りて共闘モードになります。ロボットが自分で歩いて戦ってくれるので、頼もしいですよ！',
-        done: (i, g) => g.mode === 'coop' },
-    { title: '剣で斬る', text: '右手をすばやく振ると、剣で斬れます！斬撃は前方の敵へ飛んでいきますよ。左手は、左右で旋回、前後で移動です。さあ、振ってみましょう！',
-        done: (i, g) => g.mode === 'coop' && g.sword.slashes > 0 },
-    { title: 'ロボットに乗る', text: '最後です！もう一度両手をパーにすると、ロボットに乗り込んで搭乗モードに戻れます。いよいよ出撃ですね！', done: (i, g) => g.mode === 'ride' },
-];
 
 // -----------------------------------------------------------------
 //  状態の切り替え
@@ -87,6 +73,8 @@ function setState(next) {
 }
 
 const usingKeyboard = () => keyboard?.enabled;
+const updateShowcase = createShowcase({ robot, sceneManager, game });
+const updateBones = createBonesDisplay({ hud, input, game, isKeyboard: usingKeyboard });
 
 // 状態ごとの BGM（null は無音）。ここにない状態（HAND_LOST）は今の曲を小さくして続ける
 const BGM = {
@@ -158,44 +146,6 @@ state.onChange((next) => {
             break;
     }
 });
-
-// 自機ロボットを外から映す演出（タイトル・搭乗・クリア・ゲームオーバー）。それ以外はゲームのモードどおりの視点
-let showcase = false;
-function updateShowcase(next) {
-    const c = game.companion;   // 共闘モードでも、ロボットのいる場所で演出する
-    let shown = true;
-    switch (next) {
-        case STATE.START:
-            shown = robot.show('title');
-            robot.resetHatch();
-            robot.play('Stand');
-            break;
-        case STATE.CLEAR:
-            shown = robot.show('victory', c.position, c.yaw);
-            robot.resetHatch();
-            robot.play('Victory', { once: true, fade: 0.2 });
-            break;
-        case STATE.GAME_OVER:
-            shown = robot.show('defeat', c.position, c.yaw);
-            robot.resetHatch();
-            robot.play('Defeat', { once: true, fade: 0.1 });
-            break;
-        case STATE.RESULT:
-            shown = showcase;   // クリア・ゲームオーバーの最後のポーズのまま映し続ける
-            break;
-        default:
-            shown = false;
-    }
-    showcase = !!shown;
-    sceneManager.overrideCamera = showcase ? robot.camera : null;
-    if (showcase) {
-        // コックピットの枠や剣が外から見えないように
-        game.cockpit.group.visible = false;
-        game.sword.group.visible = false;
-    } else {
-        game.syncView();
-    }
-}
 
 function showTutorialStep() {
     TUTORIAL[tutorialStep].enter?.(game);
@@ -291,12 +241,7 @@ function updateCalibration(i) {
     if (canvas) drawHands(canvas, input.hands, handStyles(i, input.orient));
 
     if (progress >= 1) {
-        const avg = (side, key) => samples.reduce((s, x) => s + x[side][key], 0) / samples.length;
-        const base = {};
-        for (const side of ['left', 'right']) base[side] = { x: avg(side, 'x'), y: avg(side, 'y'), size: avg(side, 'size') };
-        base.right.frame = averageFrame(samples.map((x) => handFrame(x.right.world)));   // ボールスティックの基準の傾き
-        base.left.pitch = samples.reduce((s, x) => s + fingerPitch(x.left.world), 0) / samples.length;   // 左手の基準の指の向き
-        input.setBase(base);
+        input.setBase(computeBase(samples));
         calibrated = true;
         resumeGame = false;
         setState(afterCalibration);
@@ -329,39 +274,6 @@ function updateRetryGesture(i) {
     if (progress >= 1) setState(STATE.READY);
 }
 
-// 手の骨格の表示（仮）：認識のされ方を見ながら遊べるように
-let showBones = CONFIG.showBones;
-addEventListener('keydown', (e) => { if (e.code === 'KeyH') showBones = !showBones; });
-
-function updateBones(i) {
-    const { bones, bonesCanvas, bonesInfo } = hud.el;
-    bones.hidden = !showBones || usingKeyboard();
-    if (bones.hidden) return;
-    drawHands(bonesCanvas, input.hands, handStyles(i, input.orient), input.base);
-    const m = input.metrics.right;
-    const axis = {
-        horizontalAuto: '照準：左右のみ（上下は自動）',
-        orientationSwitch: `照準：${input.orient.right === 'vertical' ? '縦 → 左右を操作' : '横 → 上下を操作'}`,
-        free: '照準：上下左右',
-    }[CONFIG.aimAxis];
-    const depth = !(input.base && input.hands.left) ? ''
-        : CONFIG.moveYMode === 'tilt'
-            ? `　左手の指の向き ${input.leftTilt().toFixed(0)}°（前後 ${i.moveY.toFixed(2)}）`
-            : `　左手の奥行き ${(input.offset('left').depth * 100).toFixed(0)}%（前後 ${i.moveY.toFixed(2)}）`;
-    const swing = game.mode === 'coop' ? `　振り ${i.swing.toFixed(1)}` : '';
-    bonesInfo.textContent = `${axis}${m ? `　指 ${m.curl.toFixed(0)}°　親指 ${m.thumb.toFixed(2)}` : ''}${depth}${swing}\n`
-        + `パー判定　${openInfo('左', input.metrics.left, i.leftOpen)}　${openInfo('右', input.metrics.right, i.rightOpen)}`;
-}
-
-// パーの判定に使う値（伸びている指の数・曲がり・親指の開き）。条件を満たしていない値に × を付ける
-function openInfo(name, m, open) {
-    if (!m) return `${name}：─`;
-    const o = CONFIG.modeSwitch;
-    const mark = (ok) => (ok ? '' : '×');
-    return `${name}${open ? '◎パー' : ''}：伸 ${4 - m.folded}/4${mark(m.folded === 0)}`
-        + ` 曲 ${m.curl.toFixed(0)}°${mark(m.curl <= o.maxCurl)} 親 ${m.thumb.toFixed(2)}${mark(m.thumb >= o.minThumb)}`;
-}
-
 function hudLabel() {
     if (state.is(STATE.TUTORIAL)) return 'TUTORIAL';
     if (state.is(STATE.READY)) return 'READY';
@@ -372,8 +284,13 @@ function hudLabel() {
 function updateDebug(now) {
     frames.push(now);
     frames = frames.filter((t) => now - t < 1000);
+    // 直近1秒でいちばん間が空いたフレーム（カクつきの目安。16ms 付近なら安定、50ms 以上は目に見えるカクつき）
+    let worst = 0;
+    for (let i = 1; i < frames.length; i++) worst = Math.max(worst, frames[i] - frames[i - 1]);
+    const info = sceneManager.renderer.info.render;
     debugEl.textContent = [
-        `描画 ${frames.length} fps`,
+        `描画 ${frames.length} fps（最大間隔 ${worst.toFixed(0)} ms）`,
+        `${info.calls} 呼び出し・${(info.triangles / 1000).toFixed(0)}k 三角形`,
         tracker.detectMs !== undefined ? `検出 ${tracker.detectMs.toFixed(0)} ms` : '',
         usingKeyboard() ? '[キーボード操作中]' : '',
         state.current,
@@ -389,6 +306,7 @@ try {
     // ロボットのモデルは読み込めなくてもゲームは遊べる（演出が出ないだけ）
     const robotLoad = robot.load(sceneManager.renderer).catch((err) => console.error('ロボットのモデルを読み込めませんでした', err));
     await Promise.all([tracker.init(), robotLoad, loadEnemyModels(), loadBulletModel(), game.stage.load(), game.cockpit.load(sceneManager.envMap)]);   // 敵のモデルも、読み込めなければ仮の形で遊べる
+    game.warmUp(sceneManager.renderer);
     setState(STATE.START);
 } catch (err) {
     console.error(err);

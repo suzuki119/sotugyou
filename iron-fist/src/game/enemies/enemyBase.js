@@ -141,6 +141,11 @@ export class EnemyBase {
 
     behave() {}
 
+    // モデルの正面（+Z）をプレイヤーに向ける（傾けない）
+    faceTarget(eye) {
+        this.object.lookAt(eye.x, this.position.y, eye.z);
+    }
+
     // 水平方向でプレイヤーとの距離を保ちながら回り込む
     keepDistance(dt, eye, dist, speed, strafe) {
         const to = new THREE.Vector3(eye.x - this.position.x, 0, eye.z - this.position.z);

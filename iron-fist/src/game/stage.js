@@ -3,7 +3,8 @@
 //   モデルが読み込めなかったときは、仮の地面と建物（グレーボックス）にする
 
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { createGLTFLoader } from '../render/gltfLoader.js';
+import { eachMesh } from '../render/modelUtils.js';
 
 const FIELD_URL = '/models/robot_field.glb';
 const FIELD_Y = -0.35;        // 床の高さがタイルごとに 0〜0.65m ばらつくので、真ん中あたりを 0 に合わせる
@@ -11,6 +12,8 @@ const FIELD_Y = -0.35;        // 床の高さがタイルごとに 0〜0.65m ば
 export const ARENA_RADIUS = 64;          // プレイヤー・ロボットが動ける範囲（壁の内側）
 export const ENEMY_RADIUS = 66;          // 敵が動ける範囲
 // プレイヤーの開始位置：門と反対側から、門の方（+Z）を向く（yaw は自機の決まり。0 で -Z を向く）
+// タイトル画面でロボットを立たせる場所：門（z≈72）の少し手前。ロボットは -Z（画面手前）を向く
+export const TITLE_ROBOT_SPOT = new THREE.Vector3(0, 0, 50);
 export const PLAYER_START = { position: new THREE.Vector3(0, 0, -35), yaw: Math.PI };
 
 // 敵の出てくる場所（モデルに Spawn_Enemy_L / R があればその位置を使う）
@@ -25,16 +28,14 @@ export class Stage {
         this.scene = scene;
         this.envMap = envMap;
         this.spawns = DEFAULT_SPAWNS.map((v) => v.clone());
-        this.mixer = null;
-        this.gate = null;
     }
 
     // フィールドの素材を明るくする（環境マップを当てて、金属部分が黒く沈まないようにする）
     brighten(field) {
-        field.traverse((o) => {
-            if (!o.isMesh) return;
-            for (const m of [].concat(o.material)) {
-                if (!m.isMeshStandardMaterial || !this.envMap) continue;
+        if (!this.envMap) return;
+        eachMesh(field, (o, mats) => {
+            for (const m of mats) {
+                if (!m.isMeshStandardMaterial) continue;
                 m.envMap = this.envMap;
                 m.envMapIntensity = FIELD_ENV_INTENSITY;
             }
@@ -43,7 +44,7 @@ export class Stage {
 
     async load() {
         try {
-            const gltf = await new GLTFLoader().loadAsync(FIELD_URL);
+            const gltf = await createGLTFLoader().loadAsync(FIELD_URL);
             const field = gltf.scene;
             field.position.y = FIELD_Y;
             this.brighten(field);
@@ -53,37 +54,20 @@ export class Stage {
             const found = ['Spawn_Enemy_L', 'Spawn_Enemy_R'].map((n) => field.getObjectByName(n)).filter(Boolean);
             if (found.length) this.spawns = found.map((o) => o.getWorldPosition(new THREE.Vector3()).setY(0));
 
-            // 門：何も再生していない状態は「開いている」。GateClose / GateOpen を最後のポーズで止めて使う
-            this.mixer = new THREE.AnimationMixer(field);
-            const clip = (name) => gltf.animations.find((c) => c.name === name);
-            if (clip('GateOpen') && clip('GateClose')) {
-                this.gate = { open: this.mixer.clipAction(clip('GateOpen')), close: this.mixer.clipAction(clip('GateClose')) };
-                for (const a of Object.values(this.gate)) {
-                    a.setLoop(THREE.LoopOnce, 1);
-                    a.clampWhenFinished = true;
-                }
+            // 門は最初から閉じたまま：GateClose の最後のポーズを一度だけ当てる（以降は動かさない）
+            const close = gltf.animations.find((c) => c.name === 'GateClose');
+            if (close) {
+                const mixer = new THREE.AnimationMixer(field);
+                const action = mixer.clipAction(close);
+                action.setLoop(THREE.LoopOnce, 1);
+                action.clampWhenFinished = true;   // 繰り返しだと終端で先頭（開いた形）に戻ってしまう
+                action.play();
+                mixer.update(close.duration);
             }
-            this.closeGate(true);
         } catch (err) {
             console.error('フィールドのモデルを読み込めませんでした', err);
             this.buildGreybox();
         }
-    }
-
-    // 門を閉じる。instant：アニメーションせず、すぐ閉じた状態にする
-    closeGate(instant = false) {
-        if (!this.gate) return;
-        this.gateOpen = false;
-        this.gate.open.stop();
-        this.gate.close.reset().play();
-        if (instant) this.mixer.update(this.gate.close.getClip().duration);
-    }
-
-    openGate() {
-        if (!this.gate || this.gateOpen) return;
-        this.gateOpen = true;
-        this.gate.close.stop();
-        this.gate.open.reset().play();
     }
 
     // 敵の出てくる場所（少しばらつかせる）
@@ -91,10 +75,6 @@ export class Stage {
         const base = isBoss ? BOSS_SPAWN : this.spawns[Math.floor(Math.random() * this.spawns.length)];
         const a = Math.random() * Math.PI * 2, r = isBoss ? 0 : Math.random() * SPAWN_JITTER;
         return base.clone().add(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r));
-    }
-
-    update(dt) {
-        this.mixer?.update(dt);
     }
 
     // 仮のステージ：地面と建物（動ける範囲の外側に置く）

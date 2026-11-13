@@ -4,6 +4,7 @@
 import { CONFIG } from '../config.js';
 import { formatTime } from './Hud.js';
 import { sound } from '../audio/sound.js';
+import { isComfortMode, setComfortMode } from '../settings.js';
 
 export class Screens {
     constructor(root) {
@@ -41,6 +42,25 @@ export class Screens {
             btn.addEventListener('click', () => handlers[btn.dataset.action]?.());
         }
         for (const [key, name] of Object.entries(keys)) this.actions[key] = () => handlers[name]?.();
+        this.bindComfort();
+    }
+
+    // 酔い止めモードのボタン（[data-comfort]）：押すと切り替わり、M キーでも押せる
+    bindComfort() {
+        const btn = this.root.querySelector('[data-comfort]');
+        if (!btn) return;
+        const sync = () => {
+            const on = isComfortMode();
+            btn.textContent = `酔い止めモード（揺れなし）：${on ? 'ON' : 'OFF'}`;
+            btn.classList.toggle('on', on);
+            btn.setAttribute('aria-pressed', on);
+        };
+        sync();
+        btn.addEventListener('click', () => {
+            setComfortMode(!isComfortMode());
+            sync();
+        });
+        this.actions.m = () => btn.click();
     }
 
     hide() {
@@ -68,6 +88,7 @@ export class Screens {
                 <div class="volume">
                     ${volumeSlider('bgm', 'BGM', CONFIG.sound.bgmVolume)}
                     ${volumeSlider('se', '効果音', CONFIG.sound.seVolume)}
+                    <button class="sub comfort" data-comfort><kbd>M</kbd></button>
                 </div>
                 ${CONFIG.debug ? '<p class="note">開発用：K キーでキーボード操作に切り替え</p>' : ''}
             </div>`, { start: onStart }, { Enter: 'start' });
@@ -158,6 +179,7 @@ export class Screens {
             <div class="panel center">
                 <h2>一時停止中</h2>
                 <p>両手をカメラに映して、グリップを握ると再開します</p>
+                <button class="sub comfort" data-comfort></button>
             </div>`);
     }
 

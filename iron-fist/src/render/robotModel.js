@@ -3,7 +3,8 @@
 //   クリップ：Stand / Walk / Run / Dash / Jump / Punch / Shoot / Mount / Defeat / Victory / HatchOpen / HatchClose
 
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { createGLTFLoader } from './gltfLoader.js';
+import { eachMesh, measure, footOffset, playClip } from './modelUtils.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 const MODEL_URL = '/models/robot_kansei_coop_anim.glb';
@@ -11,8 +12,9 @@ export const HEIGHT = 12;   // 立ったときの高さ（m）。プレイヤー
 
 // カメラの置き方：ロボットの正面から見た角度・距離・高さ・注視点の高さ（すべて高さに対する割合）
 //   side：注視点を左右にずらす（画面上でロボットを中央からずらし、文字と重ならないようにする）
+//   pitch：あれば height の代わりに、この俯角（度）で見下ろす位置にカメラを置く
 const SHOTS = {
-    title: { angle: 0.5, dist: 2.2, height: 0.3, look: 0.45, side: -0.8, orbit: 0 },
+    title: { angle: 0, dist: 2.1, pitch: 15, look: 0.5, side: 0, orbit: 0 },
     mount: { angle: 0.35, dist: 2.0, height: 0.6, look: 0.4, side: 0, orbit: 0.03 },
     victory: { angle: -0.3, dist: 2.4, height: 0.2, look: 0.65, side: 0, orbit: 0.1 },
     defeat: { angle: 0.7, dist: 2.2, height: 0.55, look: 0.35, side: 0, orbit: 0.05 },
@@ -45,22 +47,19 @@ export class RobotModel {
 
     // renderer：金属の映り込み用の環境マップを作るのに使う（ステージ全体には影響させない）
     async load(renderer) {
-        const gltf = await new GLTFLoader().loadAsync(MODEL_URL);
+        const gltf = await createGLTFLoader().loadAsync(MODEL_URL);
         const model = gltf.scene;
 
         // Blender 上の位置がずれているので、足元の中心を原点に合わせて大きさをそろえる
-        model.updateMatrixWorld(true);
-        const box = new THREE.Box3().setFromObject(model);
-        const center = box.getCenter(new THREE.Vector3());
-        model.position.set(-center.x, -box.min.y, -center.z);
-        this.object.scale.setScalar(HEIGHT / (box.max.y - box.min.y));
+        const m = measure(model);
+        model.position.copy(footOffset(m));
+        this.object.scale.setScalar(HEIGHT / m.size.y);
         const pmrem = new THREE.PMREMGenerator(renderer);
         const envMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
         pmrem.dispose();
-        model.traverse((o) => {
-            if (!o.isMesh) return;
+        eachMesh(model, (o, mats) => {
             o.frustumCulled = false;   // アニメーションで境界の外に出ても消えないように
-            for (const m of [o.material].flat()) {
+            for (const m of mats) {
                 m.envMap = envMap;
                 m.envMapIntensity = 0.8;
             }
@@ -71,11 +70,12 @@ export class RobotModel {
         this.cockpitMesh = model.getObjectByName('M_CO_Cockpit_Root');
         // ハッチは中から閉まるところも見えるように両面にする
         const hatch = model.getObjectByName('M_CO_Cockpit_Hatch');
-        hatch?.traverse((o) => {
-            if (!o.isMesh) return;
-            o.material = [o.material].flat().map((m) => Object.assign(m.clone(), { side: THREE.DoubleSide }));
-            if (o.material.length === 1) o.material = o.material[0];
-        });
+        if (hatch) {
+            eachMesh(hatch, (o, mats) => {
+                const doubled = mats.map((m) => Object.assign(m.clone(), { side: THREE.DoubleSide }));
+                o.material = doubled.length === 1 ? doubled[0] : doubled;
+            });
+        }
 
         this.weapon = model.getObjectByName('Weapon_Root');   // 左腕の銃（共闘モードで弾を出す位置）
         this.mixer = new THREE.AnimationMixer(model);
@@ -86,15 +86,7 @@ export class RobotModel {
     // 体のクリップ（Stand など）を切り替える。once：1回だけ再生して最後のポーズで止める
     play(name, { once = false, fade = 0.3, then } = {}) {
         if (!this.ready) return;
-        const next = this.mixer.clipAction(this.clips[name]);
-        next.reset();
-        next.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, Infinity);
-        next.clampWhenFinished = once;
-        if (this.body && this.body !== next) {
-            if (fade > 0) next.crossFadeFrom(this.body, fade, false);
-            else this.body.stop();
-        }
-        next.play();
+        const next = playClip(this.mixer, this.clips[name], this.body, { once, fade });
         this.body = next;
 
         this.mixer.removeEventListener('finished', this.onFinished);
@@ -182,12 +174,16 @@ export class RobotModel {
         this.orbit += dt * s.orbit;
         const a = this.object.rotation.y + s.angle + this.orbit;
         const p = this.object.position;
+        const lookY = p.y + HEIGHT * s.look;
+        const eyeY = s.pitch === undefined
+            ? p.y + HEIGHT * s.height
+            : lookY + HEIGHT * s.dist * Math.tan(THREE.MathUtils.degToRad(s.pitch));
         this.camera.position.set(
             p.x + Math.sin(a) * HEIGHT * s.dist,
-            p.y + HEIGHT * s.height,
+            eyeY,
             p.z + Math.cos(a) * HEIGHT * s.dist,
         );
         const right = new THREE.Vector3(Math.cos(a), 0, -Math.sin(a));
-        this.camera.lookAt(p.x + right.x * HEIGHT * s.side, p.y + HEIGHT * s.look, p.z + right.z * HEIGHT * s.side);
+        this.camera.lookAt(p.x + right.x * HEIGHT * s.side, lookY, p.z + right.z * HEIGHT * s.side);
     }
 }

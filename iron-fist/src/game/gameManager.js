@@ -3,10 +3,10 @@
 //     ride（搭乗）：ロボットに乗って、コックピットから銃で撃つ
 //     coop（共闘）：ロボットから降りて生身で剣を振る。ロボットは自分で歩いて戦う
 
-import * as THREE from 'three';
 import { Player, MAX_HP } from './player.js';
 import { Weapon } from './weapon.js';
-import { Stage, ARENA_RADIUS } from './stage.js';
+import * as THREE from 'three';
+import { Stage } from './stage.js';
 import { Drone } from './enemies/drone.js';
 import { Walker } from './enemies/walker.js';
 import { Boss } from './enemies/boss.js';
@@ -15,19 +15,22 @@ import { Cockpit } from '../render/cockpit.js';
 import { Sword } from './sword.js';
 import { Companion } from './companion.js';
 import { Boarding } from './boarding.js';
+import { Aim } from './aim.js';
+import { Effects } from './effects.js';
+import { TutorialZone } from './tutorialZone.js';
+import { JumpPads } from './jumpPad.js';
+import { Pickups, createPickupMesh } from './pickups.js';
+import { Containers, createContainerMesh } from './container.js';
 import { CONFIG } from '../config.js';
 import { sound } from '../audio/sound.js';
+import { createBullet } from '../render/bulletModel.js';
 
 const ZAKO_TO_BOSS = 12;    // この数を倒すとボス戦
 const ZAKO_MAX_TIME = 120;  // 倒しきれなくてもこの秒数でボス戦
 const MAX_ALIVE = 5;
-const ZONE_RADIUS = 7;      // チュートリアルの目的地ゾーンの半径
 const ROBOT_HIT = { radius: 4.5, scale: 0.5 };          // 共闘モードでロボットが受ける弾（大きくて当たりやすいが、ダメージは半分）
 const PLAYER_AGGRO = 0.5;   // 共闘モード：プレイヤーまでの距離がロボットまでの距離のこの割合より近い敵だけ、プレイヤーを狙う
 
-// 照準マーカーが動ける範囲（画面の端まで行かないよう少し狭める）
-const AIM_LIMIT = { x: 0.85, y: 0.8 };
-const clamp = (v, m) => Math.max(-m, Math.min(m, v));
 const flatDist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 
 export class GameManager {
@@ -45,27 +48,67 @@ export class GameManager {
         this.companion = new Companion(scene, robot);
         this.boarding = new Boarding(this.player, robot, this.cockpit);
         this.bullets = new EnemyBullets(scene);
+        this.aim = new Aim();
+        this.effects = new Effects(scene);
+        this.zone = new TutorialZone(scene);
+        this.jumpPads = new JumpPads(scene);
+        this.pickups = new Pickups(scene);
+        this.containers = new Containers(scene);
         this.enemies = [];
         this.dying = [];     // 倒れるモーション中の敵（当たり判定はもうない）
-        this.effects = [];
         this.reset();
+    }
+
+    // 初めて敵・弾・爆発が出たときのカクつき（シェーダーのコンパイルと GPU への転送）を防ぐため、
+    // 先に一度だけ小さな描画先へ描いておく。画面には出ない
+    warmUp(renderer) {
+        const enemies = [new Drone(), new Walker(), new Boss()];
+        enemies.forEach((e, i) => { e.position.set((i - 1) * 22, 0, 50); this.scene.add(e.object); });
+        enemies[0].setOutline(true);   // チュートリアルの的の輪郭
+        const bullets = ['player', 'enemy'].map((kind, i) => {
+            const b = createBullet(kind, () => new THREE.Mesh(new THREE.SphereGeometry(0.5, 6, 4), new THREE.MeshBasicMaterial()));
+            b.position.set(i * 4 - 2, 6, 40);
+            this.scene.add(b);
+            return b;
+        });
+        this.effects.add(new THREE.Vector3(0, 8, 45), 0xffe066, 1, 1);
+        const props = [createContainerMesh(), createPickupMesh()].map(({ group }, i) => {
+            group.position.set(i * 10 - 5, 3, 35);
+            this.scene.add(group);
+            return group;
+        });
+
+        const camera = new THREE.PerspectiveCamera(70, 16 / 9, 0.1, 600);
+        camera.position.set(0, 10, 0);
+        camera.lookAt(0, 5, 50);
+        const target = new THREE.WebGLRenderTarget(64, 64);
+        renderer.setRenderTarget(target);
+        renderer.render(this.scene, camera);
+        renderer.setRenderTarget(null);
+        target.dispose();
+
+        this.effects.clear();
+        for (const b of bullets) this.scene.remove(b);
+        for (const g of props) this.scene.remove(g);
+        enemies.forEach((e) => this.removeEnemy(e));
     }
 
     reset() {
         for (const e of [...this.enemies, ...this.dying]) this.removeEnemy(e);
-        for (const f of this.effects) this.scene.remove(f.mesh);
         this.enemies = [];
         this.dying = [];
-        this.effects = [];
+        this.effects.clear();
         this.hideZone();
+        this.pickups.clear();
+        this.containers.clear();
         this.weapon.clear();
         this.bullets.clear();
         this.boarding.cancel();
         this.player.reset();
-        this.stage.closeGate(true);
         this.sword.reset();
         this.companion.reset(this.player.object.position, this.player.yaw);
         this.mode = 'ride';
+        this.playing = false;   // 敵が出ている本番か（チュートリアルでは回復アイテムを落とさない）
         this.switchHold = 0;
         this.switchArmed = false;    // 一度パーをやめるまで切り替えない（開始直後の誤動作防止）
         this.syncView();
@@ -75,43 +118,49 @@ export class GameManager {
         this.spawnTimer = 1.5;
         this.boss = null;
         this.damageFlash = 0;
-        this.rawAim = { x: 0, y: 0 };      // 入力だけで決まる照準の位置
-        this.crosshair = { x: 0, y: 0 };   // エイムアシスト後の照準の位置（画面に出す・撃つ）
-        this.lock = null;
-        this.autoY = 0;
+        this.aim.reset();
     }
+
+    // HUD から読む：エイムアシスト後の照準の位置と、吸い付いている敵
+    get crosshair() { return this.aim.crosshair; }
+    get lock() { return this.aim.lock; }
 
     // mode: 'play'（敵あり）/ 'practice'（チュートリアル：敵なし）
     update(dt, input, mode) {
         this.time += dt;
         const boarding = this.boarding.running;
-        if (!boarding) this.updateModeSwitch(dt, input);
+        this.playing = mode === 'play';
+        if (!boarding && !this.player.airborne) this.updateModeSwitch(dt, input);   // 空中では乗り降りしない
         const riding = this.mode === 'ride';
         const onHit = (e, dmg, at) => this.onHit(e, dmg, at);
+        const blockers = this.containers.landed;   // 弾・斬撃を受けるコンテナ
+        const hittables = blockers.length ? [...this.enemies, ...blockers] : this.enemies;
         if (boarding) {
             // 乗り降りの演出中：操作はきかない。カメラとロボットは演出が動かす
             this.boarding.update(dt);
             sound.loop('steam');
-            this.weapon.update(dt, false, this.crosshair, this.enemies, onHit, null);
-            this.sword.update(dt, {}, false, this.enemies, onHit);
+            this.weapon.update(dt, false, this.crosshair, hittables, onHit, null);
+            this.sword.update(dt, {}, false, this.enemies, onHit, blockers);
         } else {
-            this.updateCrosshair(dt, riding ? input : { ...input, aimX: 0, aimY: 0 });
-            this.player.update(dt, input, riding ? this.rawAim : { x: 0, y: 0 });
+            this.aim.update(dt, riding ? input : { ...input, aimX: 0, aimY: 0 }, this.player.camera, this.enemies);
+            this.player.update(dt, input, riding ? this.aim.rawAim : { x: 0, y: 0 }, blockers);
+            this.jumpPads.update(dt, this.player);
             // 足音：移動の入力の大きさで音量を変える。生身は軽く速く
             const step = Math.min(1, Math.hypot(input.moveY, riding && CONFIG.turnWith !== 'leftStick' ? input.moveX : 0));
             if (step > 0.1) sound.loop('footstep', step, riding ? 1 : 1.4);
-            this.weapon.update(dt, riding && input.fire, this.crosshair, this.enemies, onHit, this.lock);
-            this.sword.update(dt, input, !riding, this.enemies, onHit);
+            this.weapon.update(dt, riding && input.fire, this.crosshair, hittables, onHit, this.lock);
+            this.sword.update(dt, input, !riding, this.enemies, onHit, blockers);
             if (riding) this.companion.follow(this.player);
             else this.companion.update(dt, { player: this.player, enemies: this.enemies, onHit });
         }
         this.companion.updateTracers(dt);
         this.cockpit.update(dt);
         this.cockpit.updateStick(input, dt);
-        this.updateEffects(dt);
+        this.effects.update(dt);
         this.updateDying(dt);
-        this.stage.update(dt);
-        this.updateZone(dt);
+        this.zone.update(dt);
+        this.pickups.update(dt, this.player, (at) => this.effects.add(at, 0x39ff6a, 3, 0.35));
+        this.containers.update(dt, (c) => this.onContainerLand(c));
         this.damageFlash = Math.max(0, this.damageFlash - dt);
         if (mode !== 'play') {
             // チュートリアル：敵は動かず撃ってこない。アニメーションと被弾の点滅だけ進める
@@ -123,14 +172,19 @@ export class GameManager {
 
         // 敵の狙い：搭乗モードはプレイヤー。共闘モードは基本的にロボットで、プレイヤーがずっと近いときだけプレイヤー
         const eye = this.player.eye;
+        // ドローンがコンテナを投げるとき：着地させるのはプレイヤーのいる場所
+        const dropper = {
+            canDrop: () => this.containers.count < CONFIG.container.max,
+            drop: (from) => this.containers.drop(from, this.player.object.position),
+        };
         const targets = [{ position: eye, radius: this.player.radius, scale: 1 }];
         if (!riding) targets.push({ position: this.companion.chest, ...ROBOT_HIT });
         for (const e of this.enemies) {
             const near = targets.length > 1 && flatDist(e.position, targets[1].position) * PLAYER_AGGRO > flatDist(e.position, eye)
                 ? targets[0] : targets.at(-1);
-            e.update(dt, { eye: near.position, bullets: this.bullets });
+            e.update(dt, { eye: near.position, bullets: this.bullets, ...dropper });
         }
-        const damage = this.bullets.update(dt, targets);
+        const damage = this.bullets.update(dt, targets, this.containers.landed, (c, dmg, at) => this.hitContainer(c, dmg, at));
         if (damage > 0 && !this.boss?.dead && !this.boarding.running) {   // 乗り降りの演出中もダメージを受けない   // ボスを倒したあと（倒れている間）はダメージを受けない
             this.player.damage(Math.round(damage));
             this.damageFlash = 0.3;
@@ -147,53 +201,14 @@ export class GameManager {
         const p = this.player.object.position, y = this.player.yaw;
         t.position.set(p.x - Math.sin(y) * 55, 10, p.z - Math.cos(y) * 55);
         t.object.lookAt(p.x, 10, p.z);
-        this.stage.closeGate(true);
         t.setOutline(true);   // 輪郭を出して、どこにいるか分かりやすくする
         return t;
     }
 
     // 目的地：正面やや先の、黄色く光るゾーン
-    showZone() {
-        this.hideZone();
-        const p = this.player.object.position, y = this.player.yaw;
-        const at = new THREE.Vector3(p.x - Math.sin(y) * 34, 0, p.z - Math.cos(y) * 34);
-        if (at.length() > ARENA_RADIUS * 0.8) at.setLength(ARENA_RADIUS * 0.8);
-        const mat = () => new THREE.MeshBasicMaterial({ color: 0xffd600, transparent: true, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending });
-        const group = new THREE.Group();
-        const disc = new THREE.Mesh(new THREE.CircleGeometry(ZONE_RADIUS, 40), mat());
-        disc.rotation.x = -Math.PI / 2;
-        disc.position.y = 0.15;
-        const ring = new THREE.Mesh(new THREE.RingGeometry(ZONE_RADIUS - 0.5, ZONE_RADIUS, 40), mat());
-        ring.rotation.x = -Math.PI / 2;
-        ring.position.y = 0.2;
-        const beam = new THREE.Mesh(new THREE.CylinderGeometry(ZONE_RADIUS, ZONE_RADIUS, 40, 40, 1, true), mat());
-        beam.position.y = 20;
-        group.add(disc, ring, beam);
-        group.position.copy(at);
-        this.scene.add(group);
-        this.zone = { group, disc, beam, at, t: 0 };
-    }
-
-    hideZone() {
-        if (!this.zone) return;
-        this.scene.remove(this.zone.group);
-        this.zone.group.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); });
-        this.zone = null;
-    }
-
-    get inZone() {
-        const z = this.zone;
-        return !!z && flatDist(this.player.object.position, z.at) < ZONE_RADIUS;
-    }
-
-    updateZone(dt) {
-        const z = this.zone;
-        if (!z) return;
-        z.t += dt;
-        const k = 0.5 + 0.5 * Math.sin(z.t * 4);
-        z.disc.material.opacity = 0.2 + 0.2 * k;
-        z.beam.material.opacity = 0.08 + 0.1 * k;
-    }
+    showZone() { this.zone.show(this.player); }
+    hideZone() { this.zone.hide(); }
+    get inZone() { return this.zone.contains(this.player.object.position); }
 
     // 手をパーにして holdMs 待つと切り替える
     updateModeSwitch(dt, input) {
@@ -241,7 +256,7 @@ export class GameManager {
 
     finishMode(mode) {
         this.mode = mode;
-        this.rawAim = { x: 0, y: 0 };
+        this.aim.recenter();
         this.syncView();
         this.onEvent('mode', mode);
     }
@@ -253,54 +268,6 @@ export class GameManager {
         this.cockpit.group.visible = !coop;
         this.sword.group.visible = coop;
         this.robot.object.visible = coop && this.robot.ready;
-    }
-
-    updateCrosshair(dt, input) {
-        const a = CONFIG.aim;
-        if (a.control === 'rate') {
-            // 倒している間だけ照準が動き、スティックを戻すとその場に止まる
-            this.rawAim.x = clamp(this.rawAim.x + input.aimX * a.rateSpeed * dt, AIM_LIMIT.x);
-            this.rawAim.y = clamp(this.rawAim.y + input.aimY * a.rateSpeed * dt, AIM_LIMIT.y);
-        } else {
-            this.rawAim = { x: input.aimX * AIM_LIMIT.x, y: input.aimY * AIM_LIMIT.y };
-        }
-
-        // 敵の画面上の位置（後ろにいる敵は除く）
-        const camera = this.player.camera;
-        camera.updateMatrixWorld();
-        const aspect = camera.aspect;
-        const onScreen = this.enemies
-            .filter((e) => !e.dead)
-            .map((e) => ({ e, p: e.position.clone().project(camera) }))
-            .filter(({ p }) => p.z <= 1);
-
-        // 上下の自動照準：照準の縦の線に一番近い敵の高さへ、なめらかに合わせる
-        if (CONFIG.aimAxis === 'horizontalAuto') {
-            let targetY = 0, bestDx = CONFIG.autoVerticalWidth;
-            for (const { p } of onScreen) {
-                const dx = Math.abs(p.x - this.rawAim.x) * aspect;
-                if (dx < bestDx) { bestDx = dx; targetY = clamp(p.y, AIM_LIMIT.y); }
-            }
-            this.autoY += (targetY - this.autoY) * Math.min(1, dt * 8);
-            this.rawAim.y = this.autoY;
-        }
-
-        // エイムアシスト：照準の近くにいる一番近い敵に吸い付く
-        let best = null, bestD = a.assistRadius;
-        for (const o of onScreen) {
-            const d = Math.hypot((o.p.x - this.rawAim.x) * aspect, o.p.y - this.rawAim.y);
-            if (d < bestD) { best = o; bestD = d; }
-        }
-        this.lock = best?.e ?? null;
-        if (best) {
-            const pull = a.assistStrength * (1 - bestD / a.assistRadius * 0.5);
-            this.crosshair = {
-                x: this.rawAim.x + (best.p.x - this.rawAim.x) * pull,
-                y: this.rawAim.y + (best.p.y - this.rawAim.y) * pull,
-            };
-        } else {
-            this.crosshair = { ...this.rawAim };
-        }
     }
 
     updateWave(dt) {
@@ -322,23 +289,54 @@ export class GameManager {
         enemy.position.x = at.x;
         enemy.position.z = at.z;
         enemy.object.lookAt(this.player.eye.x, enemy.position.y, this.player.eye.z);
-        this.stage.openGate();
         this.scene.add(enemy.object);
         this.enemies.push(enemy);
         return enemy;
     }
 
+    // コンテナが着地した：真下にいたらダメージ。ジャンプで避けられる
+    onContainerLand(c) {
+        this.effects.add(new THREE.Vector3(c.position.x, 0.6, c.position.z), 0xcfa86a, CONFIG.container.splash * 1.4, 0.4);
+        const p = this.player.object.position;
+        const near = Math.hypot(p.x - c.to.x, p.z - c.to.z) < CONFIG.container.splash && p.y < 3;
+        if (near && !this.boss?.dead && !this.boarding.running) {
+            this.player.damage(CONFIG.container.damage);
+            this.damageFlash = 0.3;
+        }
+    }
+
+    // コンテナが攻撃を受けた（自機の弾・斬撃・敵の弾）。壊れたら消える
+    hitContainer(c, damage, at) {
+        if (c.dead) return;
+        this.effects.add(at, 0xffe066, 1.2, 0.15);
+        if (!c.hit(damage)) return;
+        this.effects.add(c.position.clone(), 0xff8a3c, 9, 0.5);
+        this.containers.remove(c);
+    }
+
     onHit(enemy, damage, at) {
+        if (enemy.isContainer) return this.hitContainer(enemy, damage, at);
         if (enemy.dead) return;   // 同じフレームに2回当たったとき
         enemy.hit(damage);
-        this.effect(at, 0xffe066, 1.2, 0.15);
+        this.effects.add(at, 0xffe066, 1.2, 0.15);
         if (!enemy.dead) return;
-        this.effect(enemy.position.clone(), 0xff8a3c, enemy.radius * 2, 0.5);
+        this.effects.add(enemy.position.clone(), 0xff8a3c, enemy.radius * 2, 0.5);
         // 倒れるモーションを見せてから消す
         this.enemies = this.enemies.filter((e) => e !== enemy);
         this.dying.push(enemy);
         this.score += enemy.score;
-        if (enemy !== this.boss) this.kills += 1;
+        if (enemy !== this.boss) {
+            this.kills += 1;
+            this.dropPickup(enemy);
+        }
+    }
+
+    // 雑魚が倒れたとき、確率で回復アイテムを落とす（HP が減っているほど出やすい）
+    dropPickup(enemy) {
+        if (!this.playing) return;
+        const P = CONFIG.pickup;
+        const chance = P.chance + (1 - this.player.hp / MAX_HP) * P.lowHpBonus;
+        if (Math.random() < chance) this.pickups.drop(enemy.position);
     }
 
     updateDying(dt) {
@@ -352,31 +350,6 @@ export class GameManager {
     removeEnemy(e) {
         this.scene.remove(e.object);
         e.dispose();
-    }
-
-    // 爆発の代わり：広がって消える球
-    effect(position, color, size, life) {
-        const mesh = new THREE.Mesh(
-            new THREE.SphereGeometry(1, 12, 8),
-            new THREE.MeshBasicMaterial({ color, transparent: true }),
-        );
-        mesh.position.copy(position);
-        this.scene.add(mesh);
-        this.effects.push({ mesh, size, life, max: life });
-    }
-
-    updateEffects(dt) {
-        this.effects = this.effects.filter((f) => {
-            f.life -= dt;
-            const t = 1 - f.life / f.max;
-            f.mesh.scale.setScalar(0.2 + t * f.size);
-            f.mesh.material.opacity = 1 - t;
-            if (f.life > 0) return true;
-            this.scene.remove(f.mesh);
-            f.mesh.geometry.dispose();
-            f.mesh.material.dispose();
-            return false;
-        });
     }
 
     // スコア：撃破 + 残りHP + 早くクリアしたボーナス（計算方法は Phase 4 で調整）

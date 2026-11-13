@@ -25,13 +25,20 @@ export class EnemyBullets {
 
     // targets：[{ position, radius, scale }]（プレイヤー、共闘モードではロボットも）
     // 当たった弾のダメージ合計（scale を掛けたもの）を返す
-    update(dt, targets) {
+    // blockers：弾を遮る障害物（着地したコンテナ）。当たったら onBlock(障害物, ダメージ, 位置) を呼んで弾は消える
+    update(dt, targets, blockers = [], onBlock = () => {}) {
         let damage = 0;
         const prev = new THREE.Vector3();
         for (const b of this.list) {
             prev.copy(b.mesh.position);
             b.mesh.position.addScaledVector(b.vel, dt);
             b.life -= dt;
+            const blocker = blockers.find((c) => !c.dead && segmentHitsSphere(prev, b.mesh.position, c.position, c.radius));
+            if (blocker) {
+                onBlock(blocker, b.damage, b.mesh.position.clone());
+                b.life = 0;
+                continue;
+            }
             for (const t of targets) {
                 if (segmentHitsSphere(prev, b.mesh.position, t.position, t.radius)) {
                     damage += b.damage * t.scale;

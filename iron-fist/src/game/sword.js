@@ -52,7 +52,8 @@ export class Sword {
     }
 
     // active：共闘モードのとき true（搭乗モードでは飛んでいる斬撃だけ動かす）
-    update(dt, input, active, enemies, onHit) {
+    // blockers：斬撃が当たる敵以外のもの（コンテナ）。狙いには使わない
+    update(dt, input, active, enemies, onHit, blockers = []) {
         this.cooldown -= dt;
         if (active) {
             const swung = input.rightTracked && input.swing > CONFIG.sword.swingSpeed;
@@ -61,7 +62,7 @@ export class Sword {
             this.prevFire = input.fire;
             this.pose(dt, input);
         }
-        this.updateWaves(dt, enemies, onHit);
+        this.updateWaves(dt, blockers.length ? [...enemies, ...blockers] : enemies, onHit);
     }
 
     slash(input, enemies) {
