@@ -122,7 +122,7 @@ export class Sword {
                 if (e.dead || w.hit.has(e)) continue;
                 if (segmentHitsSphere(prev, w.mesh.position, e.position, e.radius + WAVE_RADIUS)) {
                     w.hit.add(e);
-                    onHit(e, DAMAGE, w.mesh.position.clone());
+                    onHit(e, e.isContainer ? 9999 : DAMAGE, w.mesh.position.clone());   // コンテナは一撃で壊せる（人形態の役割）
                 }
             }
         }

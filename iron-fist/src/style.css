@@ -210,6 +210,13 @@ body:has(.tutorial) .mode-badge { top: 270px; }
 .energy-bar em { position: absolute; left: 0; right: 0; top: -20px; text-align: center; font-size: 12px; font-style: normal; font-weight: bold; letter-spacing: 0.15em; color: var(--fire); visibility: hidden; }
 .energy-bar.overheat .bar-fill { background: var(--fire); }
 .energy-bar.overheat em { visibility: visible; animation: overheat-blink 0.4s steps(2) infinite; }
+/* シンクロゲージ（銃のエネルギーのすぐ上） */
+.sync-bar { position: absolute; bottom: 72px; left: 50%; transform: translateX(-50%); width: 360px; height: 8px; background: #1b2731; border: 1px solid var(--line); }
+.sync-bar span { position: absolute; left: -44px; top: -5px; font-size: 13px; color: var(--muted); }
+.sync-bar .bar-fill { background: #5cd6ff; transition: width 0.15s; }
+.sync-bar em { position: absolute; left: 0; right: 0; top: -20px; text-align: center; font-size: 12px; font-style: normal; font-weight: bold; letter-spacing: 0.15em; color: #5cd6ff; visibility: hidden; }
+.sync-bar.full em { visibility: visible; animation: overheat-blink 0.5s steps(2) infinite; }
+.sync-bar.full .bar-fill { background: #fff; }
 @keyframes overheat-blink { 50% { opacity: 0; } }
 
 .damage-flash { position: absolute; inset: 0; background: radial-gradient(transparent 40%, rgba(255, 40, 40, 0.7)); opacity: 0; }

@@ -25,6 +25,7 @@ export class Weapon {
         this.cooldown = 0;
         this.side = 0;
         this.raycaster = new THREE.Raycaster();
+        this.coop = false;         // 降りている間は、エネルギーが速く回復する
         this.resetEnergy();
     }
 
@@ -48,8 +49,9 @@ export class Weapon {
             this.spawn(aim, enemies, lock);
         }
         // 撃っていなければ回復（オーバーヒート中は親指を閉じたままでも回復する）
-        if ((!firing || this.overheat) && this.sinceShot * 1000 >= E.regenDelayMs) {
-            this.energy = Math.min(E.max, this.energy + E.regenPerSec * dt);
+        const delay = this.coop ? E.coopRegenDelayMs : E.regenDelayMs;
+        if ((!firing || this.overheat) && this.sinceShot * 1000 >= delay) {
+            this.energy = Math.min(E.max, this.energy + E.regenPerSec * (this.coop ? E.coopRegenMul : 1) * dt);
         }
         if (this.overheat && this.energy >= E.resumeAt) this.overheat = false;
 

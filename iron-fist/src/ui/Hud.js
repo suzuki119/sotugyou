@@ -33,6 +33,7 @@ export class Hud {
                 <div class="hand-state"></div>
                 <div class="fire-lamp">FIRE</div>
             </div>
+            <div class="sync-bar"><span>SYNC</span><div class="bar-fill"></div><em>搭乗でバースト！</em></div>
             <div class="energy-bar"><span>EN</span><div class="bar-fill"></div><em>OVERHEAT</em></div>
             <div class="hp-bar"><span>HP</span><div class="bar-fill"></div></div>
             <div class="damage-flash"></div>
@@ -46,6 +47,8 @@ export class Hud {
             bossBar: $('.boss-bar'),
             bossFill: $('.boss-bar .bar-fill'),
             hpFill: $('.hp-bar .bar-fill'),
+            syncBar: $('.sync-bar'),
+            syncFill: $('.sync-bar .bar-fill'),
             energyBar: $('.energy-bar'),
             energyFill: $('.energy-bar .bar-fill'),
             left: $('.hand-panel.left'),
@@ -108,7 +111,10 @@ export class Hud {
         const w = game.weapon;
         const shooting = input.fire && !w.overheat;
         el.fire.classList.toggle('on', coop ? game.sword.swingT < 1 : shooting);
-        el.energyBar.hidden = coop;
+        el.energyBar.hidden = false;   // 降りている間も表示（銃のエネルギーが速く回復するのが見える）
+        el.syncBar.hidden = !game.playing;
+        el.syncFill.style.width = `${game.sync * 100}%`;
+        el.syncBar.classList.toggle('full', game.sync >= 1);
         el.energyFill.style.width = `${(w.energy / CONFIG.energy.max) * 100}%`;
         el.energyBar.classList.toggle('overheat', w.overheat);
 

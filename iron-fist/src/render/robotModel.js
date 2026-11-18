@@ -17,6 +17,7 @@ const SHOTS = {
     title: { angle: 0, dist: 2.1, pitch: 15, look: 0.5, side: 0, orbit: 0 },
     mount: { angle: 0.35, dist: 2.0, height: 0.6, look: 0.4, side: 0, orbit: 0.03 },
     victory: { angle: -0.3, dist: 2.4, height: 0.2, look: 0.65, side: 0, orbit: 0.1 },
+    burst: { angle: 2.5, dist: 2.2, height: 0.45, look: 0.55, side: 0, orbit: 0.15 },   // バースト：斜め後ろから全身を映す
     defeat: { angle: 0.7, dist: 2.2, height: 0.55, look: 0.35, side: 0, orbit: 0.05 },
 };
 

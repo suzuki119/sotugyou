@@ -1,6 +1,6 @@
-// 乗り降りの演出（一人称）：プレイヤーの目線のまま、ハッチの開いたロボットに乗り込む・降りる
-//   乗る：ロボットの前まで歩く（ロボットは片膝をつく）→ ハッチが開く → よじ登って中で振り返る → ハッチが閉まる → 立ち上がる
-//   降りる：ロボットが片膝をつく → ハッチが開く → 外へ出て振り返る → ハッチが閉まる → ロボットが立ち上がる
+// 乗り降りの演出（一人称・テンポ重視版。元の遅い版は boarding.classic.js）：プレイヤーの目線のまま、ハッチの開いたロボットに乗り込む・降りる
+//   乗る：ロボットへ走る（片膝をつくと同時にハッチが開く）→ 体を回転させながらジャンプで飛び込む → ハッチが閉まる → 立ち上がる（約3秒）
+//   降りる：片膝をつくと同時にハッチが開く → ジャンプで飛び出して着地・振り返る → ロボットが立ち上がる（約2.4秒）
 //   カメラは Player の object（位置・向き）とカメラ（高さ・上下の向き）を直接動かす
 
 import * as THREE from 'three';
@@ -9,11 +9,12 @@ import { ARENA_RADIUS } from './stage.js';
 const FOOT_EYE = 1.7;        // 生身の目の高さ
 const RIDE_EYE = 7;          // コックピットの目の高さ（立っているとき）
 const FRONT = 10;            // ロボットの前の、乗り降りするときに立つ場所（足元から前へ 10m）
-const WALK_SPEED = 8;        // 乗りに行くときに歩く速さ（m/s）
+const WALK_SPEED = 14;       // 乗りに行くときに走る速さ（m/s）
 const KEEP_OUT = 6;          // 歩くときにロボットの中心からこれ以上は近づかない（m）
-const KNEEL = 2.0;           // Mount クリップ（片膝をつく）の長さ
-const HATCH = 1.04;          // HatchOpen / HatchClose の長さ
-const FADE = 0.4;            // コックピットの内装が現れる・消える時間
+const SPEED = 2.5;           // 乗り降りの間、ロボットのアニメーションを速くする倍率（片膝・ハッチが 1/2.5 の時間になる）
+const KNEEL = 2.0 / SPEED;   // Mount クリップ（片膝をつく）の長さ
+const HATCH = 1.04 / SPEED;  // HatchOpen / HatchClose の長さ
+const FADE = 0.2;            // コックピットの内装が現れる・消える時間
 
 const smooth = (t) => t * t * (3 - 2 * t);
 const clamp01 = (t) => Math.min(1, Math.max(0, t));
@@ -34,59 +35,66 @@ export class Boarding {
         return !!this.active;
     }
 
+    // ロボットのアニメーションの速さ（演出中だけ速くする）
+    speed(x) {
+        if (this.robot.mixer) this.robot.mixer.timeScale = x;
+    }
+
     // 乗る。robotPos / robotYaw：ロボットのいる場所と向き。done：終わったら呼ぶ
     mount(robotPos, robotYaw, done) {
         const p = this.player;
         const start = p.object.position.clone().setY(p.camera.position.y);
         const front = this.frontOf(robotPos, robotYaw);
-        // ロボットの体をすり抜けないよう、ロボットの周りを回り込んで正面へ歩く（中心からの角度と距離で補間）
+        // ロボットの体をすり抜けないよう、ロボットの周りを回り込んで正面へ走る（中心からの角度と距離で補間）
         const rel = (v) => ({ a: Math.atan2(v.x - robotPos.x, v.z - robotPos.z), d: Math.hypot(v.x - robotPos.x, v.z - robotPos.z) });
         const from = rel(start), to = rel(front);
         const path = (k) => {
             const a = lerpAngle(from.a, to.a, k);
-            // 近すぎるところから歩き出したときは、まず離れてから回り込む
+            // 近すぎるところから走り出したときは、まず離れてから回り込む
             const away = THREE.MathUtils.lerp(Math.min(from.d, KEEP_OUT), KEEP_OUT, Math.min(1, k * 3));
             const d = Math.max(THREE.MathUtils.lerp(from.d, to.d, k), away);
             return new THREE.Vector3(robotPos.x + Math.sin(a) * d, THREE.MathUtils.lerp(start.y, FOOT_EYE, k), robotPos.z + Math.cos(a) * d);
         };
         const length = Math.abs(wrap(to.a - from.a)) * Math.max(from.d, to.d) + Math.abs(from.d - to.d);
-        const walk = THREE.MathUtils.clamp(length / WALK_SPEED, 1.2, 4);
+        const run = THREE.MathUtils.clamp(length / WALK_SPEED, 0.6, 1.4);
         const r = this.robot;
         const s = { yaw: p.yaw, pitch: 0 };
 
         r.place(robotPos, robotYaw);
         r.object.visible = r.ready;
         r.resetHatch();
-        r.play('Mount', { once: true, fade: 0.3, then: () => r.hatch(true) });
+        this.speed(SPEED);
+        r.play('Mount', { once: true, fade: 0.15 });
+        r.hatch(true);   // 片膝をつくのを待たず、すぐ開く
         this.cockpit.group.visible = false;
 
         this.start('mount', done, [
-            // ロボットの前まで歩きながら、ロボット（コックピット）の方を見上げる
+            // ロボットへ走りながら、コックピットの方を見上げる（片膝とハッチの動きが終わるまで待つ）
             {
-                time: Math.max(walk, KNEEL + HATCH * 0.8), run: (t, dt, sec) => {
-                    const k = smooth(clamp01(sec / walk));
+                time: Math.max(run, KNEEL), run: (t, dt, sec) => {
+                    const k = smooth(clamp01(sec / run));
                     const at = path(k);
                     const look = this.seat();
-                    const turn = smooth(clamp01(sec / 0.6));
+                    const turn = smooth(clamp01(sec / 0.3));
                     this.view(at, lerpAngle(s.yaw, yawOf(look.clone().sub(at)), turn), pitchTo(at, look) * turn);
                 },
             },
-            // ハッチによじ登り、中に入りながら振り返って座る
+            // 飛び込む：体を回転させて、ロボットに背を向けて座る向きになりながら跳ぶ
             {
-                time: 1.8, run: (t) => {
+                time: 0.7, run: (t) => {
                     const k = smooth(t);
                     const seat = this.seat();
                     const at = front.clone().lerp(seat, k);
-                    at.y += Math.sin(k * Math.PI) * 1.2;   // 少し持ち上がって乗り越える感じ
+                    at.y += Math.sin(k * Math.PI) * 2.2;   // 弧を描いて跳ぶ
                     const faceIn = yawOf(seat.clone().sub(front));
-                    const turn = smooth(clamp01((t - 0.55) / 0.45));
+                    const turn = smooth(clamp01((t - 0.15) / 0.75));
                     const pitch = THREE.MathUtils.lerp(pitchTo(at, seat.clone().add(new THREE.Vector3(0, 0.5, 0))), 0, turn);
-                    this.view(at, lerpAngle(faceIn, robotYaw, turn), pitch);
+                    this.view(at, lerpAngle(faceIn, robotYaw, turn), pitch, Math.sin(turn * Math.PI) * 0.18);
                 },
             },
-            // 中からハッチが閉まるのを見る。コックピットの枠も上から下りてきて閉まる
+            // 中からハッチが閉まる。コックピットの枠も上から下りてきて閉まる
             {
-                time: HATCH + 0.3,
+                time: HATCH + 0.05,
                 enter: () => {
                     r.hatch(false);
                     this.cockpit.setOpen(1);
@@ -94,21 +102,21 @@ export class Boarding {
                     this.cockpit.group.visible = true;
                 },
                 run: (t, dt, sec) => {
-                    this.cockpit.setFade(clamp01(sec / FADE));   // 内装はすっと現れる
+                    this.cockpit.setFade(clamp01(sec / FADE));
                     this.cockpit.setOpen(1 - smooth(clamp01(sec / HATCH)));
                     this.view(this.seat(), robotYaw, 0);
                 },
             },
             // 立ち上がる：外のロボットは消して、コックピットの中だけにする。目線が上がる
             {
-                time: 1.2,
+                time: 0.6,
                 enter: () => {
                     s.from = this.seat();
                     r.object.visible = false;
                     this.cockpit.setOpen(0);
-        this.cockpit.setFade(1);
                     this.cockpit.setFade(1);
-                    r.play('Stand', { fade: 1.0 });
+                    this.speed(1);
+                    r.play('Stand', { fade: 0.5 });
                 },
                 run: (t) => {
                     const to = robotPos.clone().setY(RIDE_EYE);
@@ -128,36 +136,30 @@ export class Boarding {
         r.object.visible = false;
         r.animateHidden = true;   // 見えないうちから片膝をつかせる（コックピットの位置を合わせるため）
         r.resetHatch();
-        r.play('Mount', { once: true, fade: 0.3 });
+        this.speed(SPEED);
+        r.play('Mount', { once: true, fade: 0.15 });
         this.cockpit.group.visible = true;
 
         this.start('dismount', () => done(front.clone().setY(0), robotYaw), [
-            // ロボットが片膝をつく：コックピットの目線が下がる
+            // 片膝をつきながら、すぐハッチが開く。コックピットの枠も一緒に跳ね上がる
             {
-                time: KNEEL, run: (t) => {
+                time: KNEEL + 0.1,
+                enter: () => { r.hatch(true); },
+                run: (t, dt, sec) => {
+                    if (sec > 0.15 && !r.object.visible) {
+                        r.object.visible = r.ready;
+                        r.animateHidden = false;
+                    }
+                    this.cockpit.setOpen(smooth(clamp01(sec / HATCH)));
                     const from = robotPos.clone().setY(RIDE_EYE);
                     this.view(from.lerp(this.seat(), smooth(t)), robotYaw, 0);
                 },
             },
-            // ハッチが開く。コックピットの枠も一緒に跳ね上がって開き、外のロボットが見えてくる
+            // ジャンプで飛び出し、弧を描いて地面に降りる（振り返らない）
             {
-                time: HATCH + 0.2,
-                enter: () => {
-                    r.object.visible = r.ready;
-                    r.animateHidden = false;
-                    r.hatch(true);
-                },
-                run: (t, dt, sec) => {
-                    this.cockpit.setOpen(smooth(clamp01(sec / HATCH)));
-                    this.view(this.seat(), robotYaw, 0);
-                },
-            },
-            // 外へ出て、地面に降りながら振り返る
-            {
-                time: 1.8,
+                time: 0.75,
                 enter: () => { s.from = this.seat(); },
                 run: (t, dt, sec) => {
-                    // 立ち上がって外へ出るあいだに、コックピットの内装はすっと消える
                     if (this.cockpit.group.visible) {
                         const a = 1 - clamp01(sec / FADE);
                         this.cockpit.setFade(a);
@@ -169,32 +171,18 @@ export class Boarding {
                     }
                     const k = smooth(t);
                     const at = s.from.clone().lerp(front, k);
-                    at.y += Math.sin(k * Math.PI) * 0.8;
-                    const turn = smooth(clamp01((t - 0.4) / 0.6));
-                    const look = this.seat();
-                    this.view(at, lerpAngle(robotYaw, yawOf(look.clone().sub(at)), turn), pitchTo(at, look) * turn);
+                    at.y += Math.sin(k * Math.PI) * 2.8;
+                    this.view(at, robotYaw, 0);   // 振り返らず、そのまま前を向いて飛び出す
                 },
             },
-            // ハッチが閉まり、ロボットが立ち上がるのを見上げる
+            // 着地（少し沈む）。そのまま前を向いたまま、ハッチが閉まりロボットが立ち上がる
             {
-                time: HATCH + 1.4,
-                enter: () => r.hatch(false),
-                run: (t, dt, elapsed) => {
-                    if (elapsed >= HATCH && !s.stood) {
-                        s.stood = true;
-                        r.play('Stand', { fade: 1.2 });
-                    }
-                    const look = this.seat();
-                    this.view(front, yawOf(look.clone().sub(front)), pitchTo(front, look));
-                },
-            },
-            // ロボットと同じ方を向く
-            {
-                time: 0.8,
-                enter: () => { s.yaw = this.player.yaw; s.pitch = this.player.camera.rotation.x; },
+                time: 0.55,
+                enter: () => { r.hatch(false); r.play('Stand', { fade: 0.8 }); },
                 run: (t) => {
-                    const k = smooth(t);
-                    this.view(front, lerpAngle(s.yaw, robotYaw, k), s.pitch * (1 - k));
+                    const at = front.clone();
+                    at.y -= Math.sin(Math.PI * clamp01(t / 0.45)) * 0.3;
+                    this.view(at, robotYaw, 0);
                 },
             },
         ]);
@@ -221,6 +209,7 @@ export class Boarding {
         if (a.t < step.time) return;
         if (a.i + 1 < a.steps.length) return this.next();
         this.active = null;
+        this.speed(1);
         this.player.camera.rotation.x = 0;
         a.done();
     }
@@ -228,6 +217,7 @@ export class Boarding {
     // 途中でやめる（リセットなど）
     cancel() {
         this.active = null;
+        this.speed(1);
         this.cockpit.setOpen(0);
         this.robot.animateHidden = false;
         this.player.camera.rotation.x = 0;
@@ -246,13 +236,13 @@ export class Boarding {
     }
 
     // 目の位置 at（ワールド座標）から、yaw の向き・pitch の上下の向きで見る
-    view(at, yaw, pitch) {
+    view(at, yaw, pitch, roll = 0) {
         const p = this.player;
         p.object.position.set(at.x, 0, at.z);
         p.yaw = yaw;
         p.object.rotation.y = yaw;
         p.camera.position.set(0, at.y, 0);
         p.camera.rotation.x = pitch;
-        p.camera.rotation.z = 0;   // 搭乗中の揺れの傾きを残さない
+        p.camera.rotation.z = roll;   // 搭乗中の揺れの傾きは残さない（ジャンプ中だけ少し傾ける）
     }
 }

@@ -31,6 +31,9 @@ const MAX_ALIVE = 5;
 const ROBOT_HIT = { radius: 4.5, scale: 0.5 };          // 共闘モードでロボットが受ける弾（大きくて当たりやすいが、ダメージは半分）
 const PLAYER_AGGRO = 0.5;   // 共闘モード：プレイヤーまでの距離がロボットまでの距離のこの割合より近い敵だけ、プレイヤーを狙う
 
+const BURST_VOLLEYS = [0.6, 1.0, 1.4];   // バーストで撃つ時刻（秒）
+const BURST_TIME = 2.4;                  // バーストの長さ（秒）
+
 const flatDist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 
 export class GameManager {
@@ -38,6 +41,7 @@ export class GameManager {
     constructor(sceneManager, robot, onEvent) {
         const { scene, camera } = sceneManager;
         this.scene = scene;
+        this.sceneManager = sceneManager;
         this.onEvent = onEvent;
         this.stage = new Stage(scene, sceneManager.envMap);
         this.player = new Player(scene, camera);
@@ -107,6 +111,8 @@ export class GameManager {
         this.player.reset();
         this.sword.reset();
         this.companion.reset(this.player.object.position, this.player.yaw);
+        if (this.burst) this.endBurst();
+        this.sync = 0;               // シンクロゲージ（0〜1）
         this.mode = 'ride';
         this.playing = false;   // 敵が出ている本番か（チュートリアルでは回復アイテムを落とさない）
         this.switchHold = 0;
@@ -127,12 +133,16 @@ export class GameManager {
 
     // mode: 'play'（敵あり）/ 'practice'（チュートリアル：敵なし）
     update(dt, input, mode) {
+        if (this.burst) return this.updateBurst(dt);   // バースト中は時間も敵も止めて、ロボットだけ見せる
         this.time += dt;
         const boarding = this.boarding.running;
         this.playing = mode === 'play';
         if (!boarding && !this.player.airborne) this.updateModeSwitch(dt, input);   // 空中では乗り降りしない
         const riding = this.mode === 'ride';
         const onHit = (e, dmg, at) => this.onHit(e, dmg, at);
+        const swordHit = (e, dmg, at) => this.onHit(e, dmg, at, 'sword');
+        this.weapon.coop = !riding;
+        if (!riding && !boarding && this.playing) this.addSync(CONFIG.sync.perSec * dt);
         const blockers = this.containers.landed;   // 弾・斬撃を受けるコンテナ
         const hittables = blockers.length ? [...this.enemies, ...blockers] : this.enemies;
         if (boarding) {
@@ -140,7 +150,7 @@ export class GameManager {
             this.boarding.update(dt);
             sound.loop('steam');
             this.weapon.update(dt, false, this.crosshair, hittables, onHit, null);
-            this.sword.update(dt, {}, false, this.enemies, onHit, blockers);
+            this.sword.update(dt, {}, false, this.enemies, swordHit, blockers);
         } else {
             this.aim.update(dt, riding ? input : { ...input, aimX: 0, aimY: 0 }, this.player.camera, this.enemies);
             this.player.update(dt, input, riding ? this.aim.rawAim : { x: 0, y: 0 }, blockers);
@@ -149,7 +159,7 @@ export class GameManager {
             const step = Math.min(1, Math.hypot(input.moveY, riding && CONFIG.turnWith !== 'leftStick' ? input.moveX : 0));
             if (step > 0.1) sound.loop('footstep', step, riding ? 1 : 1.4);
             this.weapon.update(dt, riding && input.fire, this.crosshair, hittables, onHit, this.lock);
-            this.sword.update(dt, input, !riding, this.enemies, onHit, blockers);
+            this.sword.update(dt, input, !riding, this.enemies, swordHit, blockers);
             if (riding) this.companion.follow(this.player);
             else this.companion.update(dt, { player: this.player, enemies: this.enemies, onHit });
         }
@@ -172,18 +182,14 @@ export class GameManager {
 
         // 敵の狙い：搭乗モードはプレイヤー。共闘モードは基本的にロボットで、プレイヤーがずっと近いときだけプレイヤー
         const eye = this.player.eye;
-        // ドローンがコンテナを投げるとき：着地させるのはプレイヤーのいる場所
-        const dropper = {
-            canDrop: () => this.containers.count < CONFIG.container.max,
-            drop: (from) => this.containers.drop(from, this.player.object.position),
-        };
         const targets = [{ position: eye, radius: this.player.radius, scale: 1 }];
         if (!riding) targets.push({ position: this.companion.chest, ...ROBOT_HIT });
         for (const e of this.enemies) {
             const near = targets.length > 1 && flatDist(e.position, targets[1].position) * PLAYER_AGGRO > flatDist(e.position, eye)
                 ? targets[0] : targets.at(-1);
-            e.update(dt, { eye: near.position, bullets: this.bullets, ...dropper });
+            e.update(dt, { eye: near.position, bullets: this.bullets });
         }
+        this.containers.syncHeld();   // ドローンが動いたあとで、持たれているコンテナを追従させる
         const damage = this.bullets.update(dt, targets, this.containers.landed, (c, dmg, at) => this.hitContainer(c, dmg, at));
         if (damage > 0 && !this.boss?.dead && !this.boarding.running) {   // 乗り降りの演出中もダメージを受けない   // ボスを倒したあと（倒れている間）はダメージを受けない
             this.player.damage(Math.round(damage));
@@ -250,6 +256,7 @@ export class GameManager {
             this.boarding.mount(c.position, c.yaw, () => {
                 this.player.setMode('ride', c.position, c.yaw);
                 this.finishMode('ride');
+                if (this.playing && this.sync >= 1) this.startBurst();   // ゲージが満タンなら、乗り込んだ直後にバースト
             });
         }
     }
@@ -263,7 +270,7 @@ export class GameManager {
 
     // モードに合わせて、コックピット・剣・ロボットの見え方をそろえる
     syncView() {
-        if (this.boarding.running) return;   // 乗り降りの演出中は演出が決める
+        if (this.boarding.running || this.burst) return;   // 乗り降り・バーストの演出中は演出が決める
         const coop = this.mode === 'coop';
         this.cockpit.group.visible = !coop;
         this.sword.group.visible = coop;
@@ -279,7 +286,14 @@ export class GameManager {
         this.spawnTimer -= dt;
         if (this.spawnTimer <= 0 && this.enemies.length < MAX_ALIVE) {
             this.spawnTimer = 2.5;
-            this.spawn(Math.random() < 0.65 ? new Drone() : new Walker());
+            if (Math.random() < 0.65) {
+                const drone = new Drone();
+                // コンテナ持ちは、出現した瞬間から持っている（見た目で分かる）
+                if (this.containers.count < CONFIG.container.max && Math.random() < CONFIG.container.chance) drone.carry(this.containers.hold(drone));
+                this.spawn(drone);
+            } else {
+                this.spawn(new Walker());
+            }
         }
     }
 
@@ -314,13 +328,62 @@ export class GameManager {
         this.containers.remove(c);
     }
 
-    onHit(enemy, damage, at) {
-        if (enemy.isContainer) return this.hitContainer(enemy, damage, at);
+    addSync(v) {
+        this.sync = Math.min(1, this.sync + v);
+    }
+
+    // バースト：ロボットが全身を映されながら、場の全ての敵に3連射する
+    startBurst() {
+        const c = this.companion, r = this.robot;
+        this.sync = 0;
+        this.burst = { t: 0, next: 0, shown: false };
+        this.cockpit.group.visible = false;
+        this.sword.group.visible = false;
+        if (r.show('burst', c.position, c.yaw)) {
+            this.burst.shown = true;
+            r.resetHatch();
+            r.play('Shoot', { once: true, fade: 0.1 });
+            this.sceneManager.overrideCamera = r.camera;
+        }
+    }
+
+    updateBurst(dt) {
+        const b = this.burst;
+        b.t += dt;
+        while (b.next < BURST_VOLLEYS.length && b.t >= BURST_VOLLEYS[b.next]) {
+            b.next += 1;
+            for (const e of [...this.enemies]) {
+                if (e.dead) continue;
+                this.companion.tracer(this.robot.muzzle(), e.position);
+                this.effects.add(e.position.clone(), 0xffc94d, e.radius * 2.5, 0.4);
+                this.onHit(e, CONFIG.sync.burstDamage, e.position.clone(), 'burst');
+            }
+            sound.play('gun', { rate: 0.7 });
+        }
+        this.companion.updateTracers(dt);
+        this.effects.update(dt);
+        this.updateDying(dt);
+        if (b.t >= BURST_TIME) this.endBurst();
+    }
+
+    endBurst() {
+        this.burst = null;
+        this.sceneManager.overrideCamera = null;
+        this.robot.hide();
+        this.robot.play('Stand');
+        this.companion.anim = 'Stand';
+        this.syncView();
+    }
+
+    onHit(enemy, damage, at, source) {
+        if (source === 'sword' && this.playing) this.addSync(enemy.isContainer ? CONFIG.sync.perContainer : CONFIG.sync.perHit);
+        if (enemy.isContainer) return this.hitContainer(enemy, 9999, at);   // 自機の弾・剣・共闘ロボの攻撃は一撃で壊せる
         if (enemy.dead) return;   // 同じフレームに2回当たったとき
         enemy.hit(damage);
         this.effects.add(at, 0xffe066, 1.2, 0.15);
         if (!enemy.dead) return;
         this.effects.add(enemy.position.clone(), 0xff8a3c, enemy.radius * 2, 0.5);
+        if (enemy.container) { enemy.container.release(); enemy.container = null; }   // 持っていたコンテナはその場から落ちる
         // 倒れるモーションを見せてから消す
         this.enemies = this.enemies.filter((e) => e !== enemy);
         this.dying.push(enemy);
