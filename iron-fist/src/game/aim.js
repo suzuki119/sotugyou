@@ -24,6 +24,10 @@ export class Aim {
     }
 
     update(dt, input, camera, enemies) {
+        // ① rawAim：入力から。'position'＝入力そのもの / 'rate'＝入力の大きさが「動く速さ」（戻すとその場で止まる）
+        // ② 上下の自動照準（horizontalAuto）：照準の縦線に近い敵の画面上の高さへ、なめらかに合わせる
+        // ③ エイムアシスト：assistRadius 内で一番近い敵に吸い付く（近いほど強く。crosshair はその補正後）
+        //    onScreen：敵のワールド位置を project(camera) で画面座標(-1〜1)にしたもの。p.z>1 は後ろ側なので除く。
         const a = CONFIG.aim;
         if (a.control === 'rate') {
             // 倒している間だけ照準が動き、スティックを戻すとその場に止まる

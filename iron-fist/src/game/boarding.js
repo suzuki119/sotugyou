@@ -16,6 +16,10 @@ const KNEEL = 2.0 / SPEED;   // Mount クリップ（片膝をつく）の長さ
 const HATCH = 1.04 / SPEED;  // HatchOpen / HatchClose の長さ
 const FADE = 0.2;            // コックピットの内装が現れる・消える時間
 
+// 補助関数
+//   smooth：0〜1 の進み具合をなめらかにする（始めと終わりがゆっくり）。演出の動きはほぼこれを通す
+//   lerpAngle：角度の補間。wrap で -π〜π に折り返すので、常に「近い方の回り」で回る
+//   yawOf / pitchTo：ある点を見るための yaw（左右）・pitch（上下）の角度を求める
 const smooth = (t) => t * t * (3 - 2 * t);
 const clamp01 = (t) => Math.min(1, Math.max(0, t));
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -23,6 +27,8 @@ const lerpAngle = (a, b, t) => a + wrap(b - a) * t;
 const yawOf = (v) => Math.atan2(-v.x, -v.z);              // yaw 0 で -Z を向く（自機と同じ決まり）
 const pitchTo = (from, to) => Math.atan2(to.y - from.y, Math.hypot(to.x - from.x, to.z - from.z));
 
+// 乗り降りの演出。ゲームの座標系の約束：yaw 0 で -Z を向く／Player.object が位置と yaw、カメラが目の高さと pitch。
+// 演出は別カメラではなく、プレイヤー自身の位置・向き・目の高さを直接動かして作る（一人称のまま）。
 export class Boarding {
     constructor(player, robot, cockpit) {
         this.player = player;
@@ -37,11 +43,16 @@ export class Boarding {
 
     // ロボットのアニメーションの速さ（演出中だけ速くする）
     speed(x) {
+        // 演出中だけロボットのアニメ全体（片膝・ハッチ）を速くする。1 が通常。終了・中断時に必ず 1 へ戻す。
         if (this.robot.mixer) this.robot.mixer.timeScale = x;
     }
 
     // 乗る。robotPos / robotYaw：ロボットのいる場所と向き。done：終わったら呼ぶ
     mount(robotPos, robotYaw, done) {
+        // 搭乗の演出（約3秒）。ステップ：①走る ②飛び込む ③ハッチが閉まる ④立ち上がる
+        // ①ではロボットが片膝をつきハッチが開くのを、走りながら同時に進める（待たない）。
+        // 走る経路 path(k) は「ロボットの中心からの角度と距離」で補間する：まっすぐ走るとロボットの体をすり抜けるので、
+        //   周りを回り込むように角度を補間し、近すぎるところから始めたら先に KEEP_OUT まで離れる。
         const p = this.player;
         const start = p.object.position.clone().setY(p.camera.position.y);
         const front = this.frontOf(robotPos, robotYaw);
@@ -128,6 +139,9 @@ export class Boarding {
 
     // 降りる。終わったらプレイヤーの立つ場所と向きを done(position, yaw) に渡す
     dismount(robotPos, robotYaw, done) {
+        // 降車の演出（約2秒）。ステップ：①片膝＋ハッチ開き ②ジャンプで飛び出す ③着地して立ち上がりを待つ
+        // 振り返りはしない（ずっとロボットと同じ向き）。終わると done(降りた位置, 向き) を呼び、プレイヤーを生身に切り替える。
+        // ロボットは最初は非表示のまま片膝をつかせ（animateHidden）、コックピットの目の位置（seat）を正しく合わせる。
         const r = this.robot;
         const front = this.frontOf(robotPos, robotYaw);
         const s = {};
@@ -189,11 +203,13 @@ export class Boarding {
     }
 
     start(kind, done, steps) {
+        // 演出を開始する。steps は { time(秒), enter?(入った瞬間に1回), run(t:0〜1, dt, 経過秒) } の配列。
         this.active = { kind, done, steps, i: -1, t: 0 };
         this.next();
     }
 
     next() {
+        // 次のステップへ進み、その enter を呼ぶ。
         const a = this.active;
         a.i += 1;
         a.t = 0;
@@ -201,6 +217,7 @@ export class Boarding {
     }
 
     update(dt) {
+        // 毎フレーム呼ばれる。今のステップの run を実行し、time を超えたら次へ。最後のステップが終わったら speed を戻して done()。
         const a = this.active;
         if (!a) return;
         a.t += dt;
@@ -216,6 +233,7 @@ export class Boarding {
 
     // 途中でやめる（リセットなど）
     cancel() {
+        // 演出を途中でやめる（ゲームのリセットなど）。ロボットの速度・コックピットの開閉を元に戻す。
         this.active = null;
         this.speed(1);
         this.cockpit.setOpen(0);
@@ -225,6 +243,7 @@ export class Boarding {
 
     // ロボットの前の、乗り降りするときに立つ場所（目の高さ）
     frontOf(robotPos, robotYaw) {
+        // ロボットの正面 FRONT(10m) 先の、乗り降りのときに立つ場所。闘技場の外へ出ないよう ARENA_RADIUS で制限する。
         const at = robotPos.clone().add(new THREE.Vector3(-Math.sin(robotYaw), 0, -Math.cos(robotYaw)).multiplyScalar(FRONT));
         if (at.length() > ARENA_RADIUS) at.setLength(ARENA_RADIUS);
         return at.setY(FOOT_EYE);
@@ -232,11 +251,15 @@ export class Boarding {
 
     // 座席（目の位置）。ロボットの今のポーズでのコックピットの位置
     seat() {
+        // 目の位置（座席）。ロボットが片膝をつくと座席も下がるので、毎回その時のポーズから取り直す。
         return this.robot.seatPosition();
     }
 
     // 目の位置 at（ワールド座標）から、yaw の向き・pitch の上下の向きで見る
     view(at, yaw, pitch, roll = 0) {
+        // 目の位置 at（ワールド座標）から、yaw/pitch/roll の向きで見る。
+        //   Player.object は地面（y=0）の x,z と yaw を持ち、目の高さ at.y は子のカメラの y に入れる、という分担。
+        //   roll は視点の傾き（ジャンプ中に少し傾ける演出用）。
         const p = this.player;
         p.object.position.set(at.x, 0, at.z);
         p.yaw = yaw;

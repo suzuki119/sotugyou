@@ -27,6 +27,7 @@ export class Drone extends EnemyBase {
     }
 
     carry(container) {
+        // コンテナを持たせる。高さを CARRY_HEIGHT に上げる（吊るしたコンテナが地面に着かないように）。aligned＝頭上にいた時間、carryT＝持っている時間。
         this.container = container;
         this.height = CARRY_HEIGHT;
         this.aligned = 0;
@@ -35,6 +36,9 @@ export class Drone extends EnemyBase {
 
     // 頭上へ飛んで、落とす
     carryBehave(dt, eye) {
+        // コンテナ持ちの行動：撃たず、プレイヤーの真上へ向かう。
+        //   近づくほど減速（d×1.5 と CARRY_SPEED の小さい方）。真上（水平距離 ALIGN 以内）に ALIGN_TIME いるか、
+        //   CARRY_MAX 秒たったら release()。そのあとは普通のドローンの高さ・行動に戻る。
         const to = new THREE.Vector3(eye.x - this.position.x, 0, eye.z - this.position.z);
         const d = to.length();
         if (d > 0.5) this.position.addScaledVector(to.normalize(), Math.min(CARRY_SPEED, d * 1.5) * dt);
@@ -51,6 +55,9 @@ export class Drone extends EnemyBase {
     }
 
     behave(dt, { eye, bullets }) {
+        // 普通のドローン：プレイヤーから水平に 40m の距離を保って回り込み、高さは height±1.5 で上下に漂う。
+        // 2.5〜4 秒ごとに1発撃つ。コンテナ持ちの間は carryBehave に任せる。
+        // 高さは目標へなめらかに近づける（コンテナを落とした直後に、34m から急に落ちないように）。
         if (this.container) return this.carryBehave(dt, eye);
         this.keepDistance(dt, eye, 40, 14, this.strafe);
         const y = this.height + Math.sin(this.age * 2) * 1.5;

@@ -69,6 +69,8 @@ export class Companion {
 
     // 共闘モード
     update(dt, { player, enemies, onHit }) {
+        // 共闘モードの相棒ロボ。優先順位：①攻撃中なら攻撃を進める ②狙える敵がいてクールダウン明けなら攻撃開始
+        // ③それ以外はプレイヤーの斜め後ろ（右9m・後ろ3m）へ歩く。闘技場の外には出ない。
         this.cooldown -= dt;
         const target = this.findTarget(enemies);
 
@@ -95,6 +97,7 @@ export class Companion {
 
     // プレイヤーの斜め後ろについて歩く。敵がいれば敵の方を向く
     move(dt, player, target) {
+        // 目的地（プレイヤーの斜め後ろ）までの距離から速さを決め（遠いほど速く、最大 MAX_SPEED）、RUN_SPEED を超えたら Run、それ以下は Walk/Stand。
         const p = player.object.position;
         const offset = FOLLOW.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), player.yaw);
         const to = p.clone().add(offset).sub(this.position).setY(0);
@@ -113,6 +116,7 @@ export class Companion {
     }
 
     startAction(target) {
+        // 攻撃の種類：水平距離が PUNCH_REACH 未満で地上の敵は殴る(Punch)、それ以外は撃つ(Shoot)。クリップを1回だけ再生。
         const flat = Math.hypot(target.position.x - this.position.x, target.position.z - this.position.z);
         const kind = flat < PUNCH_REACH && target.position.y < HEIGHT ? 'punch' : 'shoot';
         this.action = { ...ATTACKS[kind], kind, target, t: 0, next: 0 };
@@ -121,6 +125,7 @@ export class Companion {
     }
 
     updateAction(dt, onHit) {
+        // 攻撃の進行：ATTACKS の hits の時刻ごとにダメージ。Shoot は弾道を出し、Punch は届く距離のときだけ当たる。終わったらクールダウン。
         const a = this.action;
         a.t += dt;
         const alive = !a.target.dead;

@@ -38,6 +38,11 @@ export class Weapon {
     // aim は照準の画面上の位置（-1〜1）
     // lock：エイムアシストで捉えている敵（いればその敵に向けて撃つ）
     update(dt, firing, aim, enemies, onHit, lock) {
+        // 毎フレーム。firing＝撃つ入力、aim＝照準の画面位置、lock＝吸い付いた敵。
+        //   ① 撃つ：cooldown が 0 以下・オーバーヒートでない・エネルギーがある → 1発出してエネルギーを減らす（0 でオーバーヒート）
+        //   ② 回復：撃っていない（またはオーバーヒート中）で、最後に撃ってから delay 以上たったら回復。
+        //      共闘中（this.coop）は delay が 0 で回復も coopRegenMul 倍
+        //   ③ 弾の移動と当たり判定：前フレームの位置〜今の位置の線分と、敵の球で判定する（速い弾のすり抜け防止）
         const E = CONFIG.energy;
         this.cooldown -= dt;
         this.sinceShot += dt;
@@ -73,6 +78,8 @@ export class Weapon {
     }
 
     spawn(aim, enemies, lock) {
+        // 弾を1発出す。狙う点 = lock がいればその敵の位置 / いなければ照準の線が敵の球に当たる点 / 何もなければ遠く(RANGE)。
+        // 左右の銃口（MUZZLES）から交互に出し、コックピットの銃身を反動で動かし、音を少し音程を変えて鳴らす。
         // 照準の先にある点を狙う（敵に当たればその敵、なければ遠く）
         this.raycaster.setFromCamera(new THREE.Vector2(aim.x, aim.y), this.camera);
         const ray = this.raycaster.ray;

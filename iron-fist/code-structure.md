@@ -4,6 +4,7 @@
 行数・行番号は作成時点（`src/` 計 約6,500行）のものです。ズレたらファイル名で探してください。
 
 - ゲームの流れ（画面遷移）は `flow.md`、仕様は `spec.md`、チュートリアルは `tutorial.md` を参照
+- **「何がどう動くか」の解説は `code-guide.md`**（このファイルは「どこに何があるか」の地図）
 - 調整用の数値はすべて `src/config.js`
 
 ---
@@ -124,13 +125,15 @@ frame(now)
 | `weapon.js` | 自機の銃（エネルギー制・連射）、当たり判定の関数 `segmentHitsSphere` |
 | `sword.js` | 共闘モードの剣と斬撃 |
 | `companion.js` | 相棒ロボット（共闘では自動で戦う、搭乗では自機そのもの） |
-| `boarding.js` | 乗り降りの演出 |
+| （`gameManager.js` 内） | **シンクロゲージ**（共闘で剣を当てて溜める）と**バースト**（満タンで乗ると出るロボットの必殺技） |
+| `boarding.js` | 乗り降りの演出（約2〜3秒のテンポ重視版） |
+| `boarding.classic.js` | 上の元の遅い版（バックアップ。使われていない） |
 | `stage.js` | 闘技場（`robot_field.glb`）、移動範囲、門、敵の出現位置 |
 | `effects.js` | 爆発の代わりの「広がる球」 |
 | `tutorialSteps.js` / `tutorialZone.js` | チュートリアルの各手順と、黄色い目的地ゾーン |
 | `jumpPad.js` | **ジャンプ板**（3か所） |
 | `pickups.js` | **回復アイテム** |
-| `container.js` | **コンテナ**（ドローンが落とす、残って壊せる障害物） |
+| `container.js` | **コンテナ**（ドローンが持ってきて頭上から垂直に落とす。ロボット大。着地後は弾を遮る障害物。自機の弾・剣は一撃で壊せる） |
 | `enemies/enemyBase.js` | 敵の共通（HP・半径・点滅・アニメ・撃破） |
 | `enemies/drone.js` `walker.js` `boss.js` | 各敵の動きと攻撃 |
 | `enemies/enemyBullets.js` | 敵の弾（コンテナで防がれる） |
@@ -334,6 +337,7 @@ grep -rn "mediapipe" src scripts
 - MediaPipe の `detectForVideo` はメインスレッドで動くため、検出が重いと描画が1フレーム止まることがある（Web Worker 化は未実施）。
 - 敵・コンテナの当たり判定は球のみ。細長い形状は実際の見た目と少しズレる。
 - 相棒ロボットはコンテナを避けず、攻撃対象にもしない。
+- バースト中は `game.update` が早期 return するので、その間 `time` も進まない。
 - 音は、ジャンプ・回復・コンテナの着地/破壊にまだ付いていない。
 - `public/models/` に `stick_controller copy.glb` などの複製ファイルが残っている（使われていない）。
 - `window.game` は開発サーバーのときだけコンソールから触れる（`main.js`）。

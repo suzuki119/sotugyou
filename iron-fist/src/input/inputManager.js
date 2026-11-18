@@ -7,6 +7,7 @@ import { GestureDetector } from '../hand/gestureDetector.js';
 import { measureTilt, TiltSmoother, fingerPitch } from '../hand/ballStick.js';
 import { OneEuroFilter } from './oneEuroFilter.js';
 
+// 入力の「空」の状態。ゲームが見るのはこの形のオブジェクト（キーボード入力も同じ形を返す）。値の意味は右のコメント。
 const EMPTY = {
     aimX: 0, aimY: 0, fire: false, moveX: 0, moveY: 0,
     rightGrip: false, leftGrip: false, rightTracked: false, leftTracked: false,
@@ -38,6 +39,9 @@ export class InputManager {
 
     // HandTracker の結果を受け取る（検出のたびに呼ばれる）
     onHands(rawHands, aspect, now) {
+        // MediaPipe の検出のたびに呼ばれる（毎フレームではなく、新しい映像フレームごと）。
+        //   手 → 位置・大きさの整形 → 手の形の判定 → 右手の剣の振り → 右手の傾き → 照準・移動の値
+        // 照準・移動は「その手がグリップ中」のときだけ入力になる（握っていない手は 0）。
         this.hands = this.processor.process(rawHands, aspect);
         const r = this.gesture.update('right', this.hands.right, now);
         const l = this.gesture.update('left', this.hands.left, now);
@@ -111,6 +115,8 @@ export class InputManager {
 
     // 右手を振る速さと向き（剣）。剣の位置は基準位置からのずれ
     updateSwing(input, aspect, now) {
+        // 右手の速さ（画面の高さ／秒）と向きを、前回の位置との差から出す。剣を振ったかの判定に使う。
+        // 速さは前回の値を 0.3 混ぜて少しだけ平滑化（1フレームの誤検出で斬らないように）。
         const h = this.hands.right;
         if (!h) {
             this.prevRight = null;
@@ -142,6 +148,7 @@ export class InputManager {
     // 手の向きで軸を切り替える照準：動かしていない方の軸は値を保つ
     //   切り替えた瞬間の手の位置を新しい基準にするので、照準は飛ばない
     updateOrientAim(orient, handX, now) {
+        // aimAxis:'orientationSwitch' 用：手を縦にすると照準の左右、横に寝かせると上下。切り替えた瞬間は基準を付け直して、照準が飛ばないようにする。
         const axis = orient === 'vertical' ? 'x' : 'y';
         const sign = axis === 'y' && CONFIG.invertOrientY ? -1 : 1;
         const range = CONFIG.aimRange.x;
@@ -167,10 +174,12 @@ export class InputManager {
 
     // 左手の指の向きが、基準の構えから上下に何度傾いているか（+ が上向き）
     leftTilt() {
+        // 左手の指の向きが、キャリブレーション時の構えから何度上下に傾いているか（+ が上向き＝後退、- が下向き＝前進）。
         return fingerPitch(this.hands.left.world) - (this.base.left.pitch ?? 0);
     }
 
     offset(side) {
+        // 手の基準位置からのずれ。depth は「カメラに近づいた距離の割合」（手の見かけの大きさは距離に反比例するため、距離に直して前後の感度をそろえる）。
         const h = this.hands[side], b = this.base[side];
         // depth：カメラに近づいた距離の割合（+ が奥＝カメラ側）
         //   見た目の大きさは距離に反比例するので、大きさの比のままだと奥側ばかり大きく出る。距離に直して前後をそろえる
@@ -183,6 +192,7 @@ export class InputManager {
 
     // 両手を見失っている時間（ms）
     lostFor(now) {
+        // 両手を見失っている時間（ms）。一定以上で一時停止(HAND_LOST)にするために main.js が見る。
         if (this.keyboard?.enabled) return 0;
         return this.hands.left || this.hands.right ? 0 : now - this.lastSeen;
     }
@@ -195,6 +205,8 @@ export class InputManager {
 
 // デッドゾーンと感度カーブ（-1〜1）
 function shape(v) {
+    // -1〜1 の入力の整形：デッドゾーン(deadzone)内は 0、それより外は 0.4t + 0.6t² のカーブ（t は端までの進み 0〜1）。
+    // 中央付近は細かく、端は大きく動くので、微調整と素早い旋回を両立できる。
     const dz = CONFIG.deadzone;
     const a = Math.min(1, Math.abs(v));
     if (a < dz) return 0;

@@ -86,6 +86,7 @@ export class EnemyBase {
     }
 
     die() {
+        // 倒れる：当たり判定を無効にし(dead)、Defeat のモーションを再生。以降は updateDying で進める。
         this.setOutline(false);
         this.dead = true;
         this.dying = 0;
@@ -109,6 +110,8 @@ export class EnemyBase {
 
     // ctx: { eye, bullets, dt }
     update(dt, ctx) {
+        // 毎フレームの共通処理：時間・点滅の更新 → 各敵の behave(動き) → 壁の外へ出ないよう補正 →
+        // 動いた速さで Stand/Run のアニメを切り替え（Attack/Hit の再生中はそのまま）。
         this.age += dt;
         this.flash -= dt;
         this.busy -= dt;
@@ -148,6 +151,7 @@ export class EnemyBase {
 
     // 水平方向でプレイヤーとの距離を保ちながら回り込む
     keepDistance(dt, eye, dist, speed, strafe) {
+        // 水平方向でプレイヤーと dist の距離を保つ：遠ければ近づき、近ければ離れ、さらに横(strafe)へ回り込む。
         const to = new THREE.Vector3(eye.x - this.position.x, 0, eye.z - this.position.z);
         const d = to.length();
         to.normalize();

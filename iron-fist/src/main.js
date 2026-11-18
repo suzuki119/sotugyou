@@ -22,6 +22,9 @@ import { createShowcase } from './render/showcase.js';
 import { createBonesDisplay } from './ui/bonesDisplay.js';
 import { sound } from './audio/sound.js';
 
+// ---- 部品の組み立て ----
+// input：手/キーボード → ゲーム用の入力 / tracker：MediaPipe / state：画面の状態 / sceneManager：three.js の土台
+// robot：自機ロボット（演出と共闘で共用）/ hud：戦闘中の計器 / screens：タイトル等の画面（どちらも HTML）
 const video = document.getElementById('video');
 const keyboard = CONFIG.debug ? new DebugKeyboardInput() : null;
 const input = new InputManager(keyboard);
@@ -35,6 +38,10 @@ const hud = new Hud(document.getElementById('hud'));
 const screens = new Screens(document.getElementById('screen'));
 const debugEl = document.getElementById('debug');
 
+// ---- main.js が持つ状態 ----
+// cameraStarted/calibrated：カメラ起動済み・基準取得済み（リトライでは省略するため覚えておく）
+// resumeTo：一時停止(HAND_LOST)から戻る先 / timer：今の状態に入ってからの秒数（状態が変わると 0 に戻る）
+// samples：キャリブレーション中の手の記録 / tutorialStep/Progress：チュートリアルの進み具合
 let cameraStarted = false;
 let calibrated = false;
 let resumeTo = null;                 // HAND_LOST から戻る状態
@@ -55,6 +62,7 @@ hud.el.recalibrate.addEventListener('click', () => {
     setState(STATE.CALIBRATION);
 });
 
+// ゲームからの通知（モード切替・ボス出現・クリア・ゲームオーバー）を受けて、画面の状態を切り替える
 const game = new GameManager(sceneManager, robot, (event, data) => {
     if (event === 'mode') hud.modeChanged(data);
     if (event === 'boss') setState(STATE.BOSS);
@@ -83,6 +91,8 @@ const BGM = {
     [STATE.CLEAR]: null, [STATE.GAME_OVER]: null, [STATE.RESULT]: null,
 };
 
+// 状態に「入った瞬間」に1回だけ実行する処理：BGM・HUD の表示・演出カメラ・画面（screens）・game.reset など。
+// 状態の「最中」の処理は下の frame() の switch が担当する。
 state.onChange((next) => {
     timer = 0;
     if (next in BGM) sound.playBgm(BGM[next]);
@@ -173,6 +183,8 @@ async function requestCamera() {
 let last = performance.now();
 let frames = [];
 
+// 毎フレーム（requestAnimationFrame）。dt は秒で、最大 0.05 に制限（タブを離れて戻った直後に大きく飛ばないように）。
+// 順序：入力取得 → 状態ごとの処理（game.update など）→ HUD → ロボット → 描画 → 音。
 function frame(now) {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
@@ -225,6 +237,7 @@ function frame(now) {
     requestAnimationFrame(frame);
 }
 
+// キャリブレーション：両手を握り続けた間の手の位置を記録し、calibrationMs たったら平均を基準(base)にする。途中で崩れたらやり直し。
 function updateCalibration(i) {
     if (usingKeyboard()) return setState(afterCalibration);
     const { left, right } = input.hands;
@@ -248,6 +261,7 @@ function updateCalibration(i) {
     }
 }
 
+// チュートリアル：今のステップの done() が true の間だけ進み具合が溜まる（1.2 秒で次のステップへ）。全ステップ終了で READY へ。
 function updateTutorial(i, dt) {
     game.update(dt, i, 'practice');
     if (TUTORIAL[tutorialStep].done(i, game)) tutorialProgress += dt / 1.2;
@@ -274,6 +288,7 @@ function updateRetryGesture(i) {
     if (progress >= 1) setState(STATE.READY);
 }
 
+// HUD 左上の文字：チュートリアル / 開始前 / ボス戦 / 撃破数。
 function hudLabel() {
     if (state.is(STATE.TUTORIAL)) return 'TUTORIAL';
     if (state.is(STATE.READY)) return 'READY';

@@ -61,6 +61,7 @@ export class Player {
 
     // 搭乗 ⇄ 生身。position / yaw は切り替えた先の場所と向き
     setMode(mode, position, yaw) {
+        // 搭乗 ⇄ 生身の切替：位置・向きを切替先に合わせ、目の高さ（7m ⇄ 1.7m）に直す。
         this.mode = mode;
         this.object.position.copy(position);
         this.yaw = yaw;
@@ -77,6 +78,11 @@ export class Player {
     // crosshair：照準の画面上の位置（-1〜1）
     // obstacles：押し返される障害物（コンテナ）。{ position, footRadius, height }
     update(dt, input, crosshair, obstacles = []) {
+        // 毎フレームの移動。
+        //   旋回：共闘＝左手の左右 / 搭乗(aimEdge)＝照準を画面端に寄せた量 / 搭乗(leftStick)＝左手の左右
+        //   前進・後退は左手の前後（moveY）、搭乗中の横移動は左手の左右（strafe）
+        //   障害物（コンテナ）：水平距離が (footRadius + 自機半径×0.5) 未満で、かつ高さ height 未満なら押し返す＝高く跳べば乗り越えられる
+        //   ジャンプ：vy（上向きの速さ）に重力をかけて y を更新。強い着地(vy<-8)は被弾のような揺れ
         let turn, strafe;
         const foot = this.mode === 'coop';
         if (foot) {
@@ -134,6 +140,9 @@ export class Player {
     // 搭乗中の揺れ：重いロボットの一歩ごとの上下・左右・傾きと、停止中の微かな振動、被弾の衝撃
     //   カメラにコックピットが付いているので、画面全体が機体といっしょに揺れる
     rideSway(dt, speed, turn) {
+        // 搭乗中のカメラの揺れ（sin 波の合成）。歩き具合 amount に比例して上下・左右・傾きが出て、
+        // 止まっていてもエンジンの微振動(idle)、被弾すると shake が 1 から 0.3 秒で減衰する衝撃。
+        // 酔い止めモード（sway.enabled=false）なら全部なし。
         const c = CONFIG.sway, s = this.sway;
         if (!c.enabled) {
             // 酔い止めモード：揺れなし
@@ -163,6 +172,7 @@ export class Player {
     }
 
     damage(n) {
+        // ダメージを受ける（HP は 0 未満にならない）。同時に画面の揺れ(shake)を最大にする。
         this.hp = Math.max(0, this.hp - n);
         this.sway.shake = 1;
     }

@@ -14,11 +14,13 @@ const GRAVITY = 22;      // 落ちる加速（m/s²）
 const HANG = SIZE.y / 2 + 3.5;   // 持たれているとき、ドローンの何 m 下に中心が来るか
 const BODY_COLOR = 0xd06a3c;
 
+// 形状はコンテナの全インスタンスで共有する（ジオメトリは使い回し、マテリアルだけ個別）
 const bodyGeo = new THREE.BoxGeometry(SIZE.x, SIZE.y, SIZE.z);
 const ribGeo = new THREE.BoxGeometry(0.5, SIZE.y * 0.92, 0.3);
 const ringGeo = new THREE.RingGeometry(CONFIG.container.splash - 0.7, CONFIG.container.splash, 40);
 
 // 見た目：赤茶色の箱に、側面のひだ。弾を受けると光るため、マテリアルは1つずつ別にする
+// 見た目だけを作る（赤茶色の箱と側面のひだ）。warmUp でシェーダーを先にコンパイルするためにも使う。
 export function createContainerMesh() {
     const material = new THREE.MeshStandardMaterial({ color: BODY_COLOR, roughness: 0.75, metalness: 0.05 });
     const group = new THREE.Group();
@@ -62,6 +64,7 @@ export class Container {
 
     // 持たれている間は、ドローンの真下に吊るされる
     sync() {
+        // held の間、持ち主のドローンの HANG(9.5m) 真下に追従する。落下中・着地後は何もしない。
         if (this.state === 'held' && this.owner) {
             this.object.position.copy(this.owner.position);
             this.object.position.y -= HANG;
@@ -70,6 +73,8 @@ export class Container {
 
     // 手放す：今の真下に落ちる。着地点に警告の輪を出す
     release() {
+        // 手放す：今の位置の真下へ落とす。ここで初めて警告の輪（marker）を作り、着地予定点 to を決める。
+        // fallFrom＝落ち始めの高さ（警告の輪の濃さを「どれくらい近づいたか」で変えるために使う）。
         if (this.state !== 'held') return;
         this.state = 'falling';
         this.owner = null;
@@ -91,6 +96,7 @@ export class Container {
 
     // 弾などが当たったときに HP を減らす。壊れたら true
     hit(damage) {
+        // 攻撃を受けて HP を減らす。傷むほど色が暗くなる。壊れたら true（呼び出し側が containers.remove する）。
         this.hp -= damage;
         this.flash = 0.08;
         this.material.color.setHex(BODY_COLOR).multiplyScalar(0.45 + 0.55 * Math.max(0, this.hp) / this.maxHp);   // 傷むほど暗くなる
@@ -99,6 +105,8 @@ export class Container {
 
     // 着地したフレームだけ 'landed' を返す
     update(dt) {
+        // 状態ごとの動き。held＝追従 / falling＝重力で加速して落ちる / landed＝何もしない。
+        // 落下：vy += GRAVITY×dt、y -= vy×dt。中心が CENTER_Y（地面にぴったり接する高さ）に達したら 'landed' を返す（そのフレームだけ）。
         this.flash -= dt;
         this.material.emissive.setHex(this.flash > 0 ? 0x777777 : 0x000000);
         if (this.state === 'held') return this.sync();
@@ -142,11 +150,13 @@ export class Containers {
 
     // 着地済み（攻撃を受ける・弾を遮る・自機が押し返される）
     get landed() {
+        // 着地済み（＝攻撃を受け、弾を遮り、プレイヤーを押し返す）のコンテナだけ。持たれている・落下中のものは含まない。
         return this.list.filter((c) => !c.dead);
     }
 
     // owner（ドローン）に持たせる
     hold(owner) {
+        // ドローン owner に持たせるコンテナを作り、管理リストに入れる。
         const c = new Container(this.scene, owner);
         this.list.push(c);
         return c;
@@ -154,6 +164,7 @@ export class Containers {
 
     // ドローンが動いたあとに呼ぶ：持たれているコンテナを追従させる
     syncHeld() {
+        // 持たれているコンテナ全部を、持ち主の今の位置に合わせる。敵の更新が終わってから呼ぶ。
         for (const c of this.list) c.sync();
     }
 

@@ -54,6 +54,8 @@ export class Sword {
     // active：共闘モードのとき true（搭乗モードでは飛んでいる斬撃だけ動かす）
     // blockers：斬撃が当たる敵以外のもの（コンテナ）。狙いには使わない
     update(dt, input, active, enemies, onHit, blockers = []) {
+        // active＝共闘モードか。active のときだけ入力を見て斬る（右手を swingSpeed より速く振る、または親指/クリック）。
+        // 斬撃（waves）の移動は active でなくても続ける（乗り込む直前に飛ばした斬撃が途中で消えないように）。
         this.cooldown -= dt;
         if (active) {
             const swung = input.rightTracked && input.swing > CONFIG.sword.swingSpeed;
@@ -66,6 +68,9 @@ export class Sword {
     }
 
     slash(input, enemies) {
+        // 斬る：クールダウンと振りのアニメを開始し、斬撃を1つ飛ばす。
+        // 飛ぶ向き = 前方 35° の円錐の中で一番近い敵の方向。敵がいなければ正面。
+        // 三日月の傾き = 手を振った向き（横に振れば横、縦に振れば縦）。
         this.cooldown = CONFIG.sword.cooldownMs / 1000;
         this.swingT = 0;
         // 刃は手を振った向きに動かす（キーボードで斬ったときは左右交互）
@@ -97,6 +102,7 @@ export class Sword {
 
     // 剣の見た目：右手の位置に合わせて動き、斬ったときは振り抜く
     pose(dt, input) {
+        // 剣の見た目：画面右下に置き、右手の位置（handX/Y）に合わせて動く。swingT が 0→1 の間は振り抜くアニメ（SWING_TIME 秒）。
         this.group.position.set(0.34 + input.handX * 0.22, -0.46 + input.handY * 0.14, -0.8);
         this.swingT = Math.min(1, this.swingT + dt / SWING_TIME);
         const t = this.swingT, ease = 1 - (1 - t) ** 3;
@@ -109,6 +115,8 @@ export class Sword {
     }
 
     updateWaves(dt, enemies, onHit) {
+        // 斬撃を進める：WAVE_SPEED で前進し、広がりながら薄くなる。敵（とコンテナ）を貫通し、同じものには1回だけ当たる。
+        // コンテナには 9999 を与えて一撃で壊す（敵は DAMAGE=35）。寿命が尽きたら消す。
         const prev = new THREE.Vector3();
         for (const w of this.waves) {
             prev.copy(w.mesh.position);

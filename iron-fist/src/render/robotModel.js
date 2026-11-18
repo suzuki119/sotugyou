@@ -13,6 +13,7 @@ export const HEIGHT = 12;   // 立ったときの高さ（m）。プレイヤー
 // カメラの置き方：ロボットの正面から見た角度・距離・高さ・注視点の高さ（すべて高さに対する割合）
 //   side：注視点を左右にずらす（画面上でロボットを中央からずらし、文字と重ならないようにする）
 //   pitch：あれば height の代わりに、この俯角（度）で見下ろす位置にカメラを置く
+// 外からロボットを映すカメラの置き方の一覧。burst＝バースト用（斜め後ろから全身が映る）。値の意味は上のコメント。
 const SHOTS = {
     title: { angle: 0, dist: 2.1, pitch: 15, look: 0.5, side: 0, orbit: 0 },
     mount: { angle: 0.35, dist: 2.0, height: 0.6, look: 0.4, side: 0, orbit: 0.03 },
@@ -112,6 +113,7 @@ export class RobotModel {
 
     // ハッチだけ別に動かす（体のクリップと同時に使える）
     hatch(open) {
+        // ハッチだけ別のクリップで開閉（体のクリップと重ねて再生できる）。開閉どちらも1回再生して最後の形で止める。
         if (!this.ready) return;
         const [show, hide] = open ? ['HatchOpen', 'HatchClose'] : ['HatchClose', 'HatchOpen'];
         this.mixer.clipAction(this.clips[hide]).stop();
@@ -131,6 +133,7 @@ export class RobotModel {
 
     // position の場所に、forwardYaw の向き（自機の yaw。-Z が正面）で立たせて、shot のカメラで映す
     show(shotName, position = new THREE.Vector3(), forwardYaw = 0) {
+        // ロボットを position に立たせて表示し、SHOTS の shotName のカメラで映す準備をする（モデル未読込なら false）。カメラ自体の切替は呼び出し側。
         if (!this.ready) return false;
         this.object.position.copy(position);
         this.object.rotation.y = forwardYaw + Math.PI;   // モデルの正面（+Z）を自機の正面（-Z）に合わせる
@@ -167,6 +170,7 @@ export class RobotModel {
     }
 
     update(dt) {
+        // 毎フレーム：アニメを進め、演出カメラを「ロボットの周りをゆっくり回り込む」位置に置く（表示中・見えない片膝中のみ）。
         if (!this.ready || !(this.object.visible || this.animateHidden)) return;
         this.mixer.update(dt);
 

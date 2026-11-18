@@ -86,6 +86,9 @@ export class Hud {
     }
 
     update(input, game, label) {
+        // 毎フレーム：モード表示・照準・手の状態・エネルギー/シンクロ/HP バー・ボス HP・ダメージの赤い縁を更新する。
+        // 搭乗と共闘で出す文言が違う（MODES）。エネルギーバーは共闘中も出す（速く回復する様子を見せるため）。
+        // シンクロバーは本番中(game.playing)だけ。満タン(sync>=1)で「搭乗でバースト！」が点滅する。
         const el = this.el;
         const coop = game.mode === 'coop';
         if (this.mode !== game.mode) {
