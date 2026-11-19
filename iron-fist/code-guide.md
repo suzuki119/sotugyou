@@ -521,3 +521,428 @@ t≈数秒   プレイヤーの真上（水平距離 4m 以内）に 0.6 秒い�
 - **C キー**：コックピットの位置・大きさを調整するスライダー（`cockpitDebug.js`）。
 - 画面左上のデバッグ表示：fps・最大フレーム間隔・描画呼び出し数・手の検出時間。カクつきの原因（検出が重い / 描画が重い）の切り分けに使う。
 - 乗り降りの感触の調整：`boarding.js` の `SPEED`（アニメ倍速）と、各ステップの `time`。
+
+---
+---
+
+# JS ファイル一覧：役割と export の使われ方
+
+`src/` 以下の全 JS ファイル（49本）について、**役割**・**export しているもの**・**それを使っている場所**・**import している先** を調べた一覧です。
+`import` 文を機械的に集計して作っています（ファイルを足したら、下の「再調査コマンド」で作り直せます）。
+
+## A. エントリポイント（HTML から直接読まれるもの）
+
+| HTML | 読み込む JS | 用途 |
+|---|---|---|
+| `index.html` | `src/main.js` | **ゲーム本体** |
+| `robot.html` | `src/tools/robotViewer.js` | 開発用：ロボットのアニメ確認 |
+| `ballstick.html` | `src/tools/ballstickTest.js` | 開発用：右手の傾きの検証 |
+
+## B. 依存の向き（誰が誰を import するか）
+
+```
+main.js ─┬─▶ game/gameManager.js ─┬─▶ game/{player, aim, weapon, sword, companion, boarding, container,
+         │                        │         stage, jumpPad, pickups, effects, tutorialZone}.js
+         │                        ├─▶ game/enemies/{drone, walker, boss, enemyBullets}.js ─▶ enemyBase.js
+         │                        └─▶ render/{cockpit, bulletModel}.js
+         ├─▶ input/inputManager.js ─▶ hand/{gestureDetector, landmarkProcessor, ballStick}.js, input/oneEuroFilter.js
+         ├─▶ hand/handTracker.js        （MediaPipe）
+         ├─▶ render/{sceneManager, robotModel, showcase, enemyModels, bulletModel, cockpitDebug}.js
+         ├─▶ ui/{Hud, screens, handPreview, bonesDisplay}.js
+         └─▶ audio/sound.js, camera/cameraManager.js, game/{gameState, tutorialSteps}.js, input/{calibration, debugKeyboardInput}.js
+全員 ─▶ config.js（CONFIG）
+```
+
+**設計ルールが守られているかの確認結果**
+
+| ルール | 結果 |
+|---|---|
+| `game/` は手認識（`hand/`・`input/`）を import しない | ✅ 守られている（入力は `update()` の引数 `input` で受け取る） |
+| MediaPipe を import するのは `handTracker.js` だけ | ✅ |
+| `GLTFLoader` を作るのは `gltfLoader.js` だけ（他は `createGLTFLoader()`） | ✅ |
+| `renderer.render` を呼ぶのは `sceneManager.js` だけ | ✅（`warmUp` は画面外の RenderTarget に描くだけ。開発用の `tools/` は自前で描く） |
+| 循環 import がない | ✅（`stage.js` ← `player.js` ← `Hud.js` ← `screens.js` のように一方向） |
+| 例外（意識しておくとよい点） | `game/` が `render/` を import している：`gameManager.js`（`Cockpit`・`createBullet`）、`weapon.js`（`MUZZLES`・`createBullet`）、`companion.js`（`HEIGHT`）。`ui/Hud.js` が `game/player.js` の `MAX_HP` を使う |
+
+## C. ファイル別：役割 / export / 使われている場所
+
+凡例：`名前 ← 使っているファイル`。**(なし)** は、他のファイルから import されていないもの。
+
+
+### ルート
+
+#### `config.js`
+- **役割**：**調整値の置き場**。全ファイルが `CONFIG.xxx` で読む
+- **export と使われている場所**：
+  - `CONFIG` ← `audio/sound.js`, `game/aim.js`, `game/container.js`, `game/gameManager.js`, `game/jumpPad.js`, `game/pickups.js`, `game/player.js`, `game/sword.js`, `game/tutorialSteps.js`, `game/weapon.js`, `hand/gestureDetector.js`, `hand/landmarkProcessor.js`, `input/inputManager.js`, `main.js`, `render/sceneManager.js`, `settings.js`, `tools/ballstickTest.js`, `ui/Hud.js`, `ui/bonesDisplay.js`, `ui/screens.js`
+- **import している先**：なし（外部ライブラリのみ、または何も使わない）
+
+#### `main.js`
+- **役割**：**起動の入口**（index.html から読み込まれる）。部品を組み立て、状態遷移と毎フレームの `frame()` を回す
+- **export**：なし（他から import されない。起動の入口）
+- **import している先**：`audio/sound.js`, `camera/cameraManager.js`, `config.js`, `game/gameManager.js`, `game/gameState.js`, `game/tutorialSteps.js`, `hand/handTracker.js`, `input/calibration.js`, `input/debugKeyboardInput.js`, `input/inputManager.js`, `render/bulletModel.js`, `render/cockpitDebug.js`, `render/enemyModels.js`, `render/robotModel.js`, `render/sceneManager.js`, `render/showcase.js`, `style.css`, `ui/Hud.js`, `ui/bonesDisplay.js`, `ui/handPreview.js`, `ui/screens.js`
+
+#### `settings.js`
+- **役割**：酔い止めモード（搭乗中の揺れ OFF）の保存・読み込み（localStorage）
+- **export と使われている場所**：
+  - `isComfortMode` ← `ui/screens.js`
+  - `setComfortMode` ← `ui/screens.js`
+- **import している先**：`config.js`
+
+
+### camera/・hand/・input/（入力）
+
+#### `camera/cameraManager.js`
+- **役割**：`getUserMedia` でカメラを起動。失敗の種類を `CameraError` に分類
+- **export と使われている場所**：
+  - `CAMERA_MESSAGES` ← **(なし)**
+  - `CameraError` ← `main.js`
+  - `startCamera` ← `main.js`, `tools/ballstickTest.js`
+- **import している先**：なし（外部ライブラリのみ、または何も使わない）
+
+#### `hand/ballStick.js`
+- **役割**：右手の傾き（見えないボールスティック）と、左手の指の向きの計算
+- **export と使われている場所**：
+  - `handFrame` ← `input/calibration.js`, `tools/ballstickTest.js`
+  - `fingerPitch` ← `input/calibration.js`, `input/inputManager.js`
+  - `averageFrame` ← `input/calibration.js`, `tools/ballstickTest.js`
+  - `measureTilt` ← `input/inputManager.js`
+  - `TiltSmoother` ← `input/inputManager.js`
+- **import している先**：なし（外部ライブラリのみ、または何も使わない）
+
+#### `hand/gestureDetector.js`
+- **役割**：手の形の判定（グリップ・親指で連射・パー）
+- **export と使われている場所**：
+  - `measure` ← **(なし)**
+  - `GestureDetector` ← `input/inputManager.js`
+- **import している先**：`config.js`
+
+#### `hand/handTracker.js`
+- **役割**：**MediaPipe を使う唯一のファイル**。映像フレームごとに手を検出
+- **export と使われている場所**：
+  - `HAND_CONNECTIONS` ← `ui/handPreview.js`
+  - `HandTracker` ← `main.js`, `tools/ballstickTest.js`
+- **import している先**：なし（外部ライブラリのみ、または何も使わない）
+
+#### `hand/landmarkProcessor.js`
+- **役割**：ランドマークを「手の位置・大きさ」に変換（左右反転・平滑化）
+- **export と使われている場所**：
+  - `LandmarkProcessor` ← `input/inputManager.js`
+- **import している先**：`config.js`
+
+#### `input/calibration.js`
+- **役割**：キャリブレーションの記録から基準位置を作る
+- **export と使われている場所**：
+  - `computeBase` ← `main.js`
+- **import している先**：`hand/ballStick.js`
+
+#### `input/debugKeyboardInput.js`
+- **役割**：開発用：キーボード・マウスで同じ `input` を作る（K で切替）
+- **export と使われている場所**：
+  - `DebugKeyboardInput` ← `main.js`
+- **import している先**：なし（外部ライブラリのみ、または何も使わない）
+
+#### `input/inputManager.js`
+- **役割**：**手 → ゲーム用 `input` への変換**。ゲームはここの出力だけを見る
+- **export と使われている場所**：
+  - `InputManager` ← `main.js`, `tools/ballstickTest.js`
+- **import している先**：`config.js`, `hand/ballStick.js`, `hand/gestureDetector.js`, `hand/landmarkProcessor.js`, `input/oneEuroFilter.js`
+
+#### `input/oneEuroFilter.js`
+- **役割**：ブレ取りのフィルタ（ゆっくり＝強く平滑化、速い＝弱く）
+- **export と使われている場所**：
+  - `OneEuroFilter` ← `input/inputManager.js`
+- **import している先**：なし（外部ライブラリのみ、または何も使わない）
+
+
+### game/（ゲーム本体）
+
+#### `game/aim.js`
+- **役割**：照準：入力の位置 → 上下の自動照準 → エイムアシスト
+- **export と使われている場所**：
+  - `Aim` ← `game/gameManager.js`
+- **import している先**：`config.js`
+
+#### `game/boarding.classic.js`
+- **役割**：乗り降り演出の**元の遅い版（バックアップ・未使用）**
+- **export と使われている場所**：
+  - `Boarding` ← **(なし)**
+- **import している先**：`game/stage.js`
+
+#### `game/boarding.js`
+- **役割**：乗り降りの演出（約2〜3秒・一人称）
+- **export と使われている場所**：
+  - `Boarding` ← `game/gameManager.js`
+- **import している先**：`game/stage.js`
+
+#### `game/companion.js`
+- **役割**：相棒ロボ（共闘中は自分で歩いて撃つ・殴る。搭乗中は自機と同位置）
+- **export と使われている場所**：
+  - `Companion` ← `game/gameManager.js`
+- **import している先**：`game/stage.js`, `render/robotModel.js`
+
+#### `game/container.js`
+- **役割**：コンテナ（ドローンが持ち、頭上から垂直に落とす。着地後は障害物）
+- **export と使われている場所**：
+  - `createContainerMesh` ← `game/gameManager.js`
+  - `Container` ← **(なし)**
+  - `Containers` ← `game/gameManager.js`
+- **import している先**：`config.js`
+
+#### `game/effects.js`
+- **役割**：爆発の代わりの「広がって消える球」
+- **export と使われている場所**：
+  - `Effects` ← `game/gameManager.js`
+- **import している先**：なし（外部ライブラリのみ、または何も使わない）
+
+#### `game/enemies/boss.js`
+- **役割**：ボス（扇形5発・HP半分で怒る）
+- **export と使われている場所**：
+  - `Boss` ← `game/gameManager.js`
+- **import している先**：`game/enemies/enemyBase.js`
+
+#### `game/enemies/drone.js`
+- **役割**：ドローン（空中。コンテナ持ちあり）
+- **export と使われている場所**：
+  - `Drone` ← `game/gameManager.js`
+- **import している先**：`game/enemies/enemyBase.js`
+
+#### `game/enemies/enemyBase.js`
+- **役割**：敵の共通部分（HP・点滅・アニメ・倒れる・距離を保つ）
+- **export と使われている場所**：
+  - `EnemyBase` ← `game/enemies/boss.js`, `game/enemies/drone.js`, `game/enemies/walker.js`
+- **import している先**：`game/stage.js`, `render/enemyModels.js`
+
+#### `game/enemies/enemyBullets.js`
+- **役割**：敵の弾（移動・命中・コンテナで停止）
+- **export と使われている場所**：
+  - `EnemyBullets` ← `game/gameManager.js`
+- **import している先**：`audio/sound.js`, `game/weapon.js`, `render/bulletModel.js`
+
+#### `game/enemies/walker.js`
+- **役割**：ウォーカー（地上・3連射）
+- **export と使われている場所**：
+  - `Walker` ← `game/gameManager.js`
+- **import している先**：`game/enemies/enemyBase.js`
+
+#### `game/gameManager.js`
+- **役割**：**ゲームの司令塔**。自機・武器・敵・コンテナ・乗り降り・シンクロ・バーストを束ねる
+- **export と使われている場所**：
+  - `GameManager` ← `main.js`
+- **import している先**：`audio/sound.js`, `config.js`, `game/aim.js`, `game/boarding.js`, `game/companion.js`, `game/container.js`, `game/effects.js`, `game/enemies/boss.js`, `game/enemies/drone.js`, `game/enemies/enemyBullets.js`, `game/enemies/walker.js`, `game/jumpPad.js`, `game/pickups.js`, `game/player.js`, `game/stage.js`, `game/sword.js`, `game/tutorialZone.js`, `game/weapon.js`, `render/bulletModel.js`, `render/cockpit.js`
+
+#### `game/gameState.js`
+- **役割**：画面の状態の定義（`STATE`）と、状態を保持・通知するクラス
+- **export と使われている場所**：
+  - `STATE` ← `main.js`, `render/showcase.js`
+  - `GameState` ← `main.js`
+- **import している先**：なし（外部ライブラリのみ、または何も使わない）
+
+#### `game/jumpPad.js`
+- **役割**：ジャンプ板（3か所）
+- **export と使われている場所**：
+  - `JumpPads` ← `game/gameManager.js`
+- **import している先**：`config.js`
+
+#### `game/pickups.js`
+- **役割**：回復アイテム
+- **export と使われている場所**：
+  - `createPickupMesh` ← `game/gameManager.js`
+  - `Pickups` ← `game/gameManager.js`
+- **import している先**：`config.js`
+
+#### `game/player.js`
+- **役割**：自機：HP・移動・旋回・ジャンプ・搭乗中の揺れ。カメラを子に持つ
+- **export と使われている場所**：
+  - `MAX_HP` ← `game/gameManager.js`, `ui/Hud.js`
+  - `Player` ← `game/gameManager.js`
+- **import している先**：`config.js`, `game/stage.js`
+
+#### `game/stage.js`
+- **役割**：闘技場の読み込み、移動範囲・出現位置・開始位置の定数
+- **export と使われている場所**：
+  - `ARENA_RADIUS` ← `game/boarding.classic.js`, `game/boarding.js`, `game/companion.js`, `game/player.js`, `game/tutorialZone.js`
+  - `ENEMY_RADIUS` ← `game/enemies/enemyBase.js`
+  - `TITLE_ROBOT_SPOT` ← `render/showcase.js`
+  - `PLAYER_START` ← `game/player.js`
+  - `Stage` ← `game/gameManager.js`
+- **import している先**：`render/gltfLoader.js`, `render/modelUtils.js`
+
+#### `game/sword.js`
+- **役割**：共闘中の剣と斬撃（敵・コンテナを貫通）
+- **export と使われている場所**：
+  - `Sword` ← `game/gameManager.js`
+- **import している先**：`config.js`, `game/weapon.js`
+
+#### `game/tutorialSteps.js`
+- **役割**：チュートリアルの各ステップ（文言と `done` 条件）
+- **export と使われている場所**：
+  - `TUTORIAL` ← `main.js`
+- **import している先**：`config.js`
+
+#### `game/tutorialZone.js`
+- **役割**：チュートリアルの黄色い目的地ゾーン
+- **export と使われている場所**：
+  - `TutorialZone` ← `game/gameManager.js`
+- **import している先**：`game/stage.js`
+
+#### `game/weapon.js`
+- **役割**：搭乗中の銃（エネルギー制・連射）。線分と球の当たり判定関数も持つ
+- **export と使われている場所**：
+  - `Weapon` ← `game/gameManager.js`
+  - `segmentHitsSphere` ← `game/enemies/enemyBullets.js`, `game/sword.js`
+- **import している先**：`audio/sound.js`, `config.js`, `render/bulletModel.js`, `render/cockpit.js`
+
+
+### render/（描画）
+
+#### `render/bulletModel.js`
+- **役割**：弾のモデル（自機＝水色、敵＝赤）
+- **export と使われている場所**：
+  - `loadBulletModel` ← `main.js`
+  - `createBullet` ← `game/enemies/enemyBullets.js`, `game/gameManager.js`, `game/weapon.js`
+- **import している先**：`render/gltfLoader.js`
+
+#### `render/cockpit.js`
+- **役割**：コックピット（枠・操縦桿・ハンドル）。カメラの子
+- **export と使われている場所**：
+  - `COCKPIT` ← `render/cockpitDebug.js`
+  - `Cockpit` ← `game/gameManager.js`
+  - `MUZZLES` ← `game/weapon.js`
+- **import している先**：`render/gltfLoader.js`
+
+#### `render/cockpitDebug.js`
+- **役割**：開発用：コックピット調整スライダー（C キー）
+- **export と使われている場所**：
+  - `CockpitDebug` ← `main.js`
+- **import している先**：`render/cockpit.js`
+
+#### `render/enemyModels.js`
+- **役割**：敵 glb の読み込みと、1体ずつの複製（骨ごと）
+- **export と使われている場所**：
+  - `loadEnemyModels` ← `main.js`
+  - `hasEnemyModel` ← `game/enemies/enemyBase.js`
+  - `EnemyRig` ← `game/enemies/enemyBase.js`
+- **import している先**：`render/gltfLoader.js`, `render/modelUtils.js`
+
+#### `render/gltfLoader.js`
+- **役割**：**GLTFLoader/DRACOLoader を作る唯一の場所**
+- **export と使われている場所**：
+  - `createGLTFLoader` ← `game/stage.js`, `render/bulletModel.js`, `render/cockpit.js`, `render/enemyModels.js`, `render/robotModel.js`
+- **import している先**：なし（外部ライブラリのみ、または何も使わない）
+
+#### `render/modelUtils.js`
+- **役割**：glb の寸法測定・足元合わせ・クリップ再生の共通処理
+- **export と使われている場所**：
+  - `eachMesh` ← `game/stage.js`, `render/enemyModels.js`, `render/robotModel.js`
+  - `measure` ← `render/enemyModels.js`, `render/robotModel.js`
+  - `footOffset` ← `render/enemyModels.js`, `render/robotModel.js`
+  - `playClip` ← `render/enemyModels.js`, `render/robotModel.js`
+- **import している先**：なし（外部ライブラリのみ、または何も使わない）
+
+#### `render/robotModel.js`
+- **役割**：自機ロボット（アニメ・ハッチ・演出カメラ `SHOTS`・座席位置）
+- **export と使われている場所**：
+  - `HEIGHT` ← `game/companion.js`
+  - `RobotModel` ← `main.js`, `tools/robotViewer.js`
+- **import している先**：`render/gltfLoader.js`, `render/modelUtils.js`
+
+#### `render/sceneManager.js`
+- **役割**：three.js の土台（レンダラー・シーン・空・ライト・カメラ）。**描画 `render()` はここだけ**
+- **export と使われている場所**：
+  - `SceneManager` ← `main.js`
+- **import している先**：`config.js`
+
+#### `render/showcase.js`
+- **役割**：タイトル/クリア/ゲームオーバーでロボットを外から映す
+- **export と使われている場所**：
+  - `createShowcase` ← `main.js`
+- **import している先**：`game/gameState.js`, `game/stage.js`
+
+
+### ui/・audio/
+
+#### `audio/sound.js`
+- **役割**：効果音・BGM（Web Audio）。`sound` というシングルトン
+- **export と使われている場所**：
+  - `sound` ← `game/enemies/enemyBullets.js`, `game/gameManager.js`, `game/weapon.js`, `main.js`, `ui/screens.js`
+- **import している先**：`config.js`
+
+#### `ui/Hud.js`
+- **役割**：戦闘中の計器（HP・エネルギー・シンクロ・照準・手の状態）
+- **export と使われている場所**：
+  - `Hud` ← `main.js`
+  - `formatTime` ← `ui/screens.js`
+- **import している先**：`config.js`, `game/player.js`
+
+#### `ui/bonesDisplay.js`
+- **役割**：手の骨格の表示（H キーで出し入れ）
+- **export と使われている場所**：
+  - `createBonesDisplay` ← `main.js`
+- **import している先**：`config.js`, `ui/handPreview.js`
+
+#### `ui/handPreview.js`
+- **役割**：手の骨格を Canvas に描く
+- **export と使われている場所**：
+  - `drawHands` ← `main.js`, `tools/ballstickTest.js`, `ui/bonesDisplay.js`
+  - `handStyles` ← `main.js`, `tools/ballstickTest.js`, `ui/bonesDisplay.js`
+- **import している先**：`hand/handTracker.js`
+
+#### `ui/screens.js`
+- **役割**：タイトル〜リザルトの各画面（HTML の差し替え）
+- **export と使われている場所**：
+  - `Screens` ← `main.js`
+- **import している先**：`audio/sound.js`, `config.js`, `settings.js`, `ui/Hud.js`
+
+
+### tools/（開発用）
+
+#### `tools/ballstickTest.js`
+- **役割**：開発用ページ `ballstick.html`：右手の傾きの検証
+- **export**：なし（他から import されない。起動の入口）
+- **import している先**：`camera/cameraManager.js`, `config.js`, `hand/ballStick.js`, `hand/handTracker.js`, `input/inputManager.js`, `ui/handPreview.js`
+
+#### `tools/robotViewer.js`
+- **役割**：開発用ページ `robot.html`：ロボットのアニメ確認
+- **export**：なし（他から import されない。起動の入口）
+- **import している先**：`render/robotModel.js`
+
+
+## D. 他から使われていない export（整理の候補）
+
+| export | ファイル | 状況 |
+|---|---|---|
+| `CAMERA_MESSAGES` | `camera/cameraManager.js` | 同じファイル内の `CameraError` でだけ使っている。export は外せる |
+| `Container`（クラス） | `game/container.js` | `Containers` の中でだけ `new` している。外へ出す必要はない |
+| `measure`（関数） | `hand/gestureDetector.js` | `GestureDetector` の中でだけ使っている（`render/modelUtils.js` にも同名の別関数 `measure` があるので注意） |
+| `Boarding`（クラス） | `game/boarding.classic.js` | **ファイルごと未使用のバックアップ** |
+
+> `measure` は2つある：`hand/gestureDetector.js`（**手の形**を測る）と `render/modelUtils.js`（**glb の寸法**を測る）。名前が同じだけで無関係。
+
+## E. 横断的に使われるもの（変更の影響が大きい export）
+
+| export | 使っている数 | 変えるときの注意 |
+|---|---|---|
+| `CONFIG`（`config.js`） | 20 ファイル | 項目名を変えたら全ファイルを検索する |
+| `sound`（`audio/sound.js`） | 5 ファイル | `play`/`loop` の引数を変えるときは全ての呼び出しを確認 |
+| `STATE`（`game/gameState.js`） | `main.js`, `render/showcase.js` | 状態を足したら `main.js` の `BGM` 表と `onChange` の switch も足す |
+| `ARENA_RADIUS`（`game/stage.js`） | 5 ファイル（うち1つはバックアップ） | 闘技場の大きさを変えたとき、プレイヤー・ロボ・演出の移動範囲が全部変わる |
+| `createGLTFLoader`（`render/gltfLoader.js`） | 5 ファイル | glb の読み込み方（Draco など）はここだけで変える |
+| `createBullet`（`render/bulletModel.js`） | `weapon.js`, `enemyBullets.js`, `gameManager.js` | 弾の見た目はここだけ |
+| `segmentHitsSphere`（`game/weapon.js`） | `weapon.js`, `sword.js`, `enemyBullets.js` | **すべての当たり判定がこの関数**。ここを直すと弾・斬撃・敵の弾が全部変わる |
+| `GameManager`（`game/gameManager.js`） | `main.js` だけ | ゲームのルールの変更はほぼここで完結する |
+
+## F. 再調査コマンド
+
+ファイルを足したり消したりしたあとは、次で「どこで使われているか」を確かめられます。
+
+```bash
+# あるファイルを import している場所
+grep -rn "from '.*gameManager" src
+
+# ある名前（関数・クラス）の使用箇所
+grep -rn "segmentHitsSphere" src
+
+# 他のファイルから import されていない export を探す（名前を入れて、ヒットが定義の1件だけなら未使用）
+grep -rn "CAMERA_MESSAGES" src
+```

@@ -23,15 +23,15 @@ export const COCKPIT = {
     // 位置はカメラ座標（目からの距離 m）：x 右が + / y 上が + / z 奥が -。回転は度
     stick: {
         url: '/models/stick_controller_draco.glb',
-        position: new THREE.Vector3(-0.45, -0.7, -0.65),   // 画面の左
+        position: new THREE.Vector3(-0.2, -0.6, -0.65),   // 画面の左
         rotation: { x: 0, y: 0, z: 0 },
         scale: 1,
-        // モデルの Stick_L_SlideX に高さ 0.11 が入っていて、スティックが台から浮くので下げる（モデルを直したら 0 に）
-        slideYOffset: -0.11,
+        // 高さの補正（モデル側でスティック部品を -0.11 下げ済みなので 0。古いモデルに戻すなら -0.11）
+        slideYOffset: 0,
     },
     handle: {
         url: '/models/handle_controller_draco.glb',
-        position: new THREE.Vector3(0.35, -0.6, -0.65),    // 画面の右
+        position: new THREE.Vector3(0, -0.6, -0.65),    // 画面の右
         rotation: { x: 0, y: 0, z: 0 },
         scale: 1,
     },
@@ -125,7 +125,7 @@ export class Cockpit {
             prepare(stick.scene);
             this.stick = this.setupController(stick, COCKPIT.stick, {
                 clips: { x: 'Stick_X', y: 'Stick_Y', button: 'Stick_Button', thumb: 'Stick_ThumbBtn' },
-                deck: 'Deck_L_Root', lights: ['Stick_L_LightBand'],
+                deck: 'Armrest_L', lights: ['Stick_L_LightBand'],
             });
             // 本体から離れて浮いて見える部品（ケーブルの留め具の予備）は隠す。読み込むと名前の「.」は消える
             const stray = stick.scene.getObjectByName('Stick_L_Root001');
@@ -134,7 +134,7 @@ export class Cockpit {
         if (handle) {
             prepare(handle.scene);
             this.handle = this.setupController(handle, COCKPIT.handle, {
-                clips: { twist: 'Handle_Twist' }, deck: 'Deck_R_Root', lights: ['Handle_R_CyanRing'],
+                clips: { twist: 'Handle_Twist' }, deck: 'Armrest_R', lights: ['Handle_R_CyanRing'],
             });
         }
         this.setDeckVisible(COCKPIT.showDeck);
